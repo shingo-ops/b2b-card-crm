@@ -1,0 +1,120 @@
+name: Sync Dashboard Data
+
+on:
+  push:
+    paths:
+      - 'docs/01_crm/TROUBLE_LOG.md'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      sync_type:
+        description: 'Type of sync to run'
+        required: true
+        default: 'trouble'
+        type: choice
+        options:
+          - trouble
+          - all
+
+env:
+  GAS_DEPLOY_URL: ${{ secrets.GAS_DASHBOARD_URL }}
+  SYNC_API_KEY: ${{ secrets.GAS_SYNC_API_KEY }}
+
+jobs:
+  sync-trouble-log:
+    name: Sync Trouble Log to Spreadsheet
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.sync_type == 'trouble' || github.event.inputs.sync_type == 'all'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Parse TROUBLE_LOG.md and sync
+        run: |
+          # TROUBLE_LOG.md をパースしてJSONに変換
+          node << 'EOF'
+          const fs = require('fs');
+
+          const content = fs.readFileSync('docs/01_crm/TROUBLE_LOG.md', 'utf-8');
+
+          // TROUBLE-XXX パターンを抽出
+          const troublePattern = /### (TROUBLE-\d+)[^\n]*\n([^#]*?)(?=### TROUBLE-|\n## |$)/g;
+          const troubles = [];
+
+          let match;
+          while ((match = troublePattern.exec(content)) !== null) {
+            const troubleId = match[1];
+            const block = match[2];
+
+            // 日付を抽出
+            const dateMatch = block.match(/\*\*発生日\*\*[：:]\s*(\d{4}-\d{2}-\d{2})/);
+            const date = dateMatch ? dateMatch[1] : null;
+
+            // タイトルを抽出
+            const titleMatch = block.match(/\*\*事象\*\*[：:]\s*([^\n]+)/);
+            const title = titleMatch ? titleMatch[1].trim() : troubleId;
+
+            // 再発かどうかを判定
+            const isRecurrence = /再発|RECURRENCE/i.test(block);
+
+            // 真因を抽出
+            const rootCauseMatch = block.match(/\*\*真因\*\*[：:]\s*([^\n]+)/);
+            const rootCause = rootCauseMatch ? rootCauseMatch[1].trim() : '';
+
+            if (date) {
+              troubles.push({
+                trouble_id: troubleId,
+                date: date,
+                title: title,
+                is_recurrence: isRecurrence,
+                root_cause: rootCause
+              });
+            }
+          }
+
+          console.log('Parsed troubles:', JSON.stringify(troubles, null, 2));
+
+          // 結果をファイルに保存
+          fs.writeFileSync('/tmp/troubles.json', JSON.stringify(troubles));
+          console.log(`Found ${troubles.length} troubles`);
+          EOF
+
+      - name: Sync to GAS
+        if: env.GAS_DEPLOY_URL != ''
+        run: |
+          TROUBLES=$(cat /tmp/troubles.json)
+
+          RESPONSE=$(curl -s -X POST "$GAS_DEPLOY_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"action\": \"sync_trouble\",
+              \"api_key\": \"$SYNC_API_KEY\",
+              \"data\": $TROUBLES
+            }")
+
+          echo "Response: $RESPONSE"
+
+          # 成功チェック
+          SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
+          if [ "$SUCCESS" != "true" ]; then
+            echo "Sync failed!"
+            exit 1
+          fi
+
+          SYNCED=$(echo "$RESPONSE" | jq -r '.synced_count // 0')
+          echo "Synced $SYNCED new troubles"
+
+      - name: Skip sync (no URL configured)
+        if: env.GAS_DEPLOY_URL == ''
+        run: |
+          echo "GAS_DASHBOARD_URL secret is not configured. Skipping sync."
+          echo "To enable sync, add the following secrets:"
+          echo "  - GAS_DASHBOARD_URL: Your GAS Web App deployment URL"
+          echo "  - GAS_SYNC_API_KEY: API key for authentication (optional)"

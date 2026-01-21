@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <?!= include('style'); ?>
+</head>
+<body>
+  <!-- 同意画面 -->
+  <div id="consent-screen" class="screen">
+    <div class="consent-container">
+      <h1>壁打ちアプリへようこそ</h1>
+      <p class="subtitle">考えを整理するお手伝いをします</p>
+
+      <div class="terms-box">
+        <h2>ご利用にあたって</h2>
+        <ul>
+          <li>このアプリはAI（Gemini）との対話システムです</li>
+          <li>会話内容は匿名化して記録・分析されます</li>
+          <li>個人を特定する情報は収集しません</li>
+          <li>深刻なお悩みには専門家への相談をお勧めします</li>
+          <li>いつでも利用を中止できます</li>
+        </ul>
+      </div>
+
+      <button id="agree-btn" class="primary-btn">同意して始める</button>
+    </div>
+  </div>
+
+  <!-- チャット画面 -->
+  <div id="chat-screen" class="screen hidden">
+    <header>
+      <h1>壁打ち</h1>
+      <button id="end-btn" class="icon-btn" title="会話を終了">×</button>
+    </header>
+
+    <main id="chat-container">
+      <div id="messages"></div>
+    </main>
+
+    <footer>
+      <div class="input-container">
+        <textarea id="message-input" placeholder="何でも話してください..." rows="1"></textarea>
+        <button id="send-btn" class="send-btn" disabled>
+          <span>送信</span>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 終了確認モーダル -->
+  <div id="end-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>会話を終了しますか？</h2>
+      <p>会話は保存されます。いつでも戻ってきてください。</p>
+      <div class="modal-buttons">
+        <button id="cancel-end-btn" class="secondary-btn">キャンセル</button>
+        <button id="confirm-end-btn" class="primary-btn">終了する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ローディング -->
+  <div id="loading" class="loading hidden">
+    <div class="spinner"></div>
+  </div>
+
+  <script>
+    // ===== 状態管理 =====
+    let sessionId = null;
+    let userId = null;
+    let isWaitingResponse = false;
+
+    // ===== DOM要素 =====
+    const consentScreen = document.getElementById('consent-screen');
+    const chatScreen = document.getElementById('chat-screen');
+    const messagesDiv = document.getElementById('messages');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const agreeBtn = document.getElementById('agree-btn');
+    const endBtn = document.getElementById('end-btn');
+    const endModal = document.getElementById('end-modal');
+    const cancelEndBtn = document.getElementById('cancel-end-btn');
+    const confirmEndBtn = document.getElementById('confirm-end-btn');
+    const loading = document.getElementById('loading');
+
+    // ===== 初期化 =====
+    document.addEventListener('DOMContentLoaded', () => {
+      // 同意ボタン
+      agreeBtn.addEventListener('click', startSession);
+
+      // 送信ボタン
+      sendBtn.addEventListener('click', sendMessage);
+
+      // Enterキーで送信（Shift+Enterで改行）
+      messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // 入力変更時にボタン状態更新
+      messageInput.addEventListener('input', updateSendButton);
+
+      // テキストエリア自動リサイズ
+      messageInput.addEventListener('input', autoResize);
+
+      // 終了ボタン
+      endBtn.addEventListener('click', () => endModal.classList.remove('hidden'));
+      cancelEndBtn.addEventListener('click', () => endModal.classList.add('hidden'));
+      confirmEndBtn.addEventListener('click', endSession);
+    });
+
+    // ===== セッション開始 =====
+    async function startSession() {
+      showLoading();
+
+      try {
+        const response = await callServer('startSession', {});
+
+        if (response.success) {
+          sessionId = response.sessionId;
+          userId = response.userId;
+
+          // 画面切り替え
+          consentScreen.classList.add('hidden');
+          chatScreen.classList.remove('hidden');
+
+          // ウェルカムメッセージ表示
+          addMessage('assistant', response.systemMessage);
+          messageInput.focus();
+        }
+      } catch (error) {
+        alert('エラーが発生しました。ページを再読み込みしてください。');
+        console.error(error);
+      }
+
+      hideLoading();
+    }
+
+    // ===== メッセージ送信 =====
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message || isWaitingResponse) return;
+
+      // UI更新
+      addMessage('user', message);
+      messageInput.value = '';
+      autoResize();
+      updateSendButton();
+      isWaitingResponse = true;
+      sendBtn.disabled = true;
+
+      // 「入力中...」表示
+      const typingId = addTypingIndicator();
+
+      try {
+        const response = await callServer('sendMessage', {
+          sessionId: sessionId,
+          userId: userId,
+          message: message
+        });
+
+        // 「入力中...」削除
+        removeTypingIndicator(typingId);
+
+        if (response.success) {
+          addMessage('assistant', response.response, response.isCrisis);
+        } else {
+          addMessage('assistant', 'すみません、エラーが発生しました。');
+        }
+      } catch (error) {
+        removeTypingIndicator(typingId);
+        addMessage('assistant', 'すみません、エラーが発生しました。');
+        console.error(error);
+      }
+
+      isWaitingResponse = false;
+      updateSendButton();
+      messageInput.focus();
+    }
+
+    // ===== セッション終了 =====
+    async function endSession() {
+      showLoading();
+
+      try {
+        await callServer('endSession', { sessionId: sessionId });
+      } catch (error) {
+        console.error(error);
+      }
+
+      // 画面リセット
+      endModal.classList.add('hidden');
+      chatScreen.classList.add('hidden');
+      consentScreen.classList.remove('hidden');
+      messagesDiv.innerHTML = '';
+      sessionId = null;
+      userId = null;
+
+      hideLoading();
+    }
+
+    // ===== メッセージ追加 =====
+    function addMessage(role, content, isCrisis = false) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${role}`;
+      if (isCrisis) messageDiv.classList.add('crisis');
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'message-content';
+      contentDiv.innerHTML = formatMessage(content);
+
+      messageDiv.appendChild(contentDiv);
+      messagesDiv.appendChild(messageDiv);
+
+      // スクロール
+      scrollToBottom();
+    }
+
+    // ===== 入力中インジケーター =====
+    function addTypingIndicator() {
+      const id = 'typing-' + Date.now();
+      const div = document.createElement('div');
+      div.id = id;
+      div.className = 'message assistant typing';
+      div.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+      messagesDiv.appendChild(div);
+      scrollToBottom();
+      return id;
+    }
+
+    function removeTypingIndicator(id) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+
+    // ===== メッセージフォーマット =====
+    function formatMessage(text) {
+      // 改行をbrタグに変換
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+    }
+
+    // ===== ユーティリティ =====
+    function updateSendButton() {
+      sendBtn.disabled = !messageInput.value.trim() || isWaitingResponse;
+    }
+
+    function autoResize() {
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+    }
+
+    function scrollToBottom() {
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function showLoading() {
+      loading.classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      loading.classList.add('hidden');
+    }
+
+    // ===== サーバー通信 =====
+    async function callServer(action, params) {
+      const url = window.location.href.replace(/\?.*$/, '');
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...params })
+      });
+
+      return await response.json();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,858 @@
+<style>
+/* ===== リセット & 基本スタイル ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  min-height: 100vh;
+  color: #333;
+  line-height: 1.6;
+}
+
+/* ===== コンテナ ===== */
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* ===== 画面（スクリーン） ===== */
+.screen {
+  display: none;
+  animation: fadeIn 0.3s ease;
+}
+
+.screen.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== カード ===== */
+.card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  padding: 40px;
+  margin: 20px 0;
+}
+
+.card-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.card-header h1 {
+  font-size: 28px;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.card-header p {
+  color: #666;
+  font-size: 16px;
+}
+
+/* ===== ボタン ===== */
+.btn {
+  display: inline-block;
+  padding: 14px 40px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  color: white;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 20px rgba(37, 99, 235, 0.4);
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+.btn-success {
+  background: #10b981;
+  color: white;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: white;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-block {
+  display: block;
+  width: 100%;
+}
+
+/* ===== フォーム ===== */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: border-color 0.3s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.form-group input.input-error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.form-group .required {
+  color: #ef4444;
+}
+
+/* フォーム行（横並び） */
+.form-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.form-group.half {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* 入力ヒント */
+.input-hint {
+  display: block;
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* エラーヒント */
+.input-hint.error-hint {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+/* ===== プログレス情報 ===== */
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  font-size: 14px;
+  color: #666;
+}
+
+.section-progress {
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.question-progress {
+  color: #999;
+}
+
+/* ===== タイマープログレスバー ===== */
+.timer-progress-container {
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 30px;
+}
+
+.timer-progress-bar {
+  height: 100%;
+  background: #10b981;
+  transition: width 0.05s linear, background-color 0.3s ease;
+  border-radius: 4px;
+}
+
+.timer-progress-bar.timer-warning {
+  background: #f59e0b;
+}
+
+.timer-progress-bar.timer-danger {
+  background: #ef4444;
+  animation: pulse-bar 0.5s infinite;
+}
+
+@keyframes pulse-bar {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ===== 旧タイマー（互換性のため残す） ===== */
+.timer-container {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #f0f0f0;
+  font-size: 32px;
+  font-weight: bold;
+  color: #333;
+  transition: all 0.3s ease;
+}
+
+.timer.warning {
+  background: #fef3c7;
+  color: #f59e0b;
+}
+
+.timer.danger {
+  background: #fee2e2;
+  color: #ef4444;
+  animation: pulse 0.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* ===== 設問 ===== */
+.question-section {
+  text-align: center;
+  margin-bottom: 10px;
+  color: #666;
+  font-size: 14px;
+}
+
+.question-text {
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 30px;
+  color: #333;
+  line-height: 1.5;
+}
+
+/* ===== 選択肢 ===== */
+.options-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.option-btn {
+  padding: 16px 20px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  background: white;
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.option-btn:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: #f8f7ff;
+}
+
+.option-btn:disabled {
+  cursor: default;
+}
+
+.option-btn.selected {
+  border-color: #2563eb;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  color: white;
+}
+
+/* ===== 結果画面 ===== */
+.result-header {
+  text-align: center;
+  padding: 30px;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  border-radius: 16px 16px 0 0;
+  margin: -40px -40px 30px -40px;
+}
+
+.result-header h1 {
+  color: white;
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.result-header .type-badge {
+  display: inline-block;
+  padding: 10px 30px;
+  background: white;
+  border-radius: 30px;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+/* シンプル版結果ヘッダー */
+.result-header-simple {
+  text-align: center;
+  padding: 40px 30px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-radius: 16px 16px 0 0;
+  margin: -40px -40px 0 -40px;
+}
+
+.result-header-simple h1 {
+  color: white;
+  font-size: 28px;
+  margin-bottom: 10px;
+}
+
+.result-header-simple p {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+}
+
+.scores-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.score-card {
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.score-card.type-D { background: #fef2f2; }
+.score-card.type-I { background: #fffbeb; }
+.score-card.type-S { background: #ecfdf5; }
+.score-card.type-C { background: #eff6ff; }
+
+.score-card .type-name {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.score-card .score-value {
+  font-size: 36px;
+  font-weight: bold;
+}
+
+.score-card.type-D .score-value { color: #ef4444; }
+.score-card.type-I .score-value { color: #f59e0b; }
+.score-card.type-S .score-value { color: #10b981; }
+.score-card.type-C .score-value { color: #3b82f6; }
+
+/* ===== 判定バッジ ===== */
+.judgment-badge {
+  display: inline-block;
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.judgment-badge.pass {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.judgment-badge.pending {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.judgment-badge.fail {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* ===== 管理画面 ===== */
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.admin-header h2 {
+  font-size: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.stat-card .stat-value {
+  font-size: 32px;
+  font-weight: bold;
+  color: #2563eb;
+}
+
+.stat-card .stat-label {
+  font-size: 14px;
+  color: #666;
+  margin-top: 5px;
+}
+
+/* ===== テーブル ===== */
+.table-container {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table th, table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #333;
+}
+
+table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+/* ===== ステータスバッジ ===== */
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-badge.waiting {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.status-badge.completed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.interrupted {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.in-progress {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* ===== タブ ===== */
+.tabs {
+  display: flex;
+  border-bottom: 2px solid #e0e0e0;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 12px 24px;
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #666;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.3s ease;
+}
+
+.tab:hover {
+  color: #2563eb;
+}
+
+.tab.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+/* ===== モーダル ===== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-overlay.active {
+  display: flex;
+}
+
+.modal {
+  background: white;
+  border-radius: 16px;
+  padding: 30px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-header h3 {
+  font-size: 20px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+}
+
+/* ===== ローディング ===== */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #e0e0e0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: 15px;
+  color: #666;
+}
+
+/* ===== アラート ===== */
+.alert {
+  padding: 15px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.alert-success {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #10b981;
+}
+
+.alert-error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #ef4444;
+}
+
+.alert-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
+
+/* ===== ナビゲーション ===== */
+.nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 30px;
+}
+
+/* ===== レスポンシブ ===== */
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+
+  .card {
+    padding: 20px;
+    margin: 10px 0;
+  }
+
+  .card-header h1 {
+    font-size: 22px;
+  }
+
+  .question-text {
+    font-size: 18px;
+  }
+
+  .scores-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .score-card .score-value {
+    font-size: 28px;
+  }
+
+  .result-header {
+    margin: -20px -20px 20px -20px;
+    padding: 20px;
+  }
+
+  .result-header-simple {
+    margin: -20px -20px 0 -20px;
+    padding: 30px 20px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  table {
+    font-size: 14px;
+  }
+
+  table th, table td {
+    padding: 8px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .form-group.half {
+    margin-bottom: 20px;
+  }
+}
+
+/* ===== 練習問題バナー ===== */
+.practice-banner {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  text-align: center;
+  padding: 8px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.practice-banner span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.practice-banner span::before {
+  content: '📝';
+}
+
+/* ===== 5段階評価スケール ===== */
+.scale-container {
+  margin-bottom: 30px;
+}
+
+.scale-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  font-size: 13px;
+  color: #666;
+}
+
+.scale-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.scale-btn {
+  width: 60px;
+  height: 60px;
+  border: 3px solid #e0e0e0;
+  border-radius: 50%;
+  background: white;
+  font-size: 20px;
+  font-weight: bold;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.scale-btn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  transform: scale(1.05);
+}
+
+.scale-btn.selected {
+  border-color: #2563eb;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  color: white;
+  transform: scale(1.1);
+}
+
+/* ===== 回答ボタンコンテナ ===== */
+.answer-button-container {
+  margin-top: 30px;
+}
+
+.answer-button-container .btn:disabled {
+  background: #e0e0e0;
+  color: #999;
+}
+
+/* ===== 自由記述エリア ===== */
+.freeform-container {
+  margin-bottom: 20px;
+}
+
+.freeform-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 16px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color 0.3s ease;
+}
+
+.freeform-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.freeform-textarea::placeholder {
+  color: #999;
+}
+
+.char-count {
+  text-align: right;
+  font-size: 14px;
+  color: #666;
+  margin-top: 8px;
+}
+
+/* ===== 自由記述の残り時間表示 ===== */
+.freeform-time-display {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: #2563eb;
+  margin-bottom: 20px;
+}
+
+/* ===== スキップヒント ===== */
+.skip-hint {
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+  margin-top: 10px;
+}
+
+/* ===== レスポンシブ追加 ===== */
+@media (max-width: 768px) {
+  .scale-btn {
+    width: 50px;
+    height: 50px;
+    font-size: 18px;
+  }
+
+  .scale-buttons {
+    gap: 8px;
+  }
+
+  .freeform-textarea {
+    min-height: 150px;
+    font-size: 14px;
+  }
+}
+
+/* ===== ユーティリティ ===== */
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+.mt-10 { margin-top: 10px; }
+.mt-20 { margin-top: 20px; }
+.mt-30 { margin-top: 30px; }
+.mb-10 { margin-bottom: 10px; }
+.mb-20 { margin-bottom: 20px; }
+.mb-30 { margin-bottom: 30px; }
+.hidden { display: none !important; }
+</style>

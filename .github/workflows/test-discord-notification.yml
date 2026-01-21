@@ -1,0 +1,87 @@
+# Discord通知テスト用ワークフロー
+# 手動実行でDiscord通知をテスト
+
+name: Test Discord Notification
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'テストタイプ'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - bugreport
+          - request
+          - both
+
+jobs:
+  test-bugreport-notification:
+    name: Test Bugreport Channel
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'bugreport' || github.event.inputs.test_type == 'both' }}
+
+    steps:
+      - name: Send test notification to Bugreport channel
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_BUGREPORT_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "❌ DISCORD_BUGREPORT_WEBHOOK が設定されていません"
+            exit 1
+          fi
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"🧪 **テスト通知（バグ報告チャンネル）**\n\n✅ GitHub Actionsからの通知テストです\n📅 $(date '+%Y-%m-%d %H:%M:%S')\n🔗 実行者: ${{ github.actor }}\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+          echo "✅ バグ報告チャンネルへの通知を送信しました"
+
+  test-request-notification:
+    name: Test Request Channel
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'request' || github.event.inputs.test_type == 'both' }}
+
+    steps:
+      - name: Send test notification to Request channel
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_REQUEST_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "❌ DISCORD_REQUEST_WEBHOOK が設定されていません"
+            exit 1
+          fi
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"🧪 **テスト通知（依頼チャンネル）**\n\n✅ GitHub Actionsからの通知テストです\n📅 $(date '+%Y-%m-%d %H:%M:%S')\n🔗 実行者: ${{ github.actor }}\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+          echo "✅ 依頼チャンネルへの通知を送信しました"
+
+  test-error-format:
+    name: Test Error Format
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'bugreport' || github.event.inputs.test_type == 'both' }}
+
+    steps:
+      - name: Send error format notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_BUGREPORT_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "⚠️ DISCORD_BUGREPORT_WEBHOOK が設定されていません（スキップ）"
+            exit 0
+          fi
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"🚨 **異常検知（テスト）**\n\n❌ **失敗したワークフロー**: Security Check\n📅 **発生日時**: $(date '+%Y-%m-%d %H:%M:%S')\n🔗 **詳細**: https://github.com/${{ github.repository }}/actions\n\n👉 **対応依頼**: Claude Codeで以下を実行してください\n\`\`\`\ncd ~/sales-ops-with-claude && git pull\n\`\`\`\n\n⚠️ これはテスト通知です\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+          echo "✅ エラー形式の通知を送信しました"

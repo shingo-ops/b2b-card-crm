@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>営業教育アプリ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <!-- ===== ヘッダー ===== -->
+  <header class="header">
+    <div class="header-content">
+      <h1>🎓 営業教育アプリ</h1>
+      <nav class="header-nav">
+        <button class="nav-btn active" data-view="dashboard" onclick="switchView('dashboard')">ダッシュボード</button>
+        <button class="nav-btn" data-view="quiz" onclick="switchView('quiz')">クイズ</button>
+        <button class="nav-btn" data-view="reflection" onclick="switchView('reflection')">振り返り</button>
+        <button class="nav-btn" data-view="tips" onclick="switchView('tips')">営業Tips</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ===== メインコンテナ ===== -->
+  <div class="main-container">
+
+    <!-- ===== ダッシュボードビュー ===== -->
+    <div id="view-dashboard" class="view active">
+      <!-- プロフィールカード -->
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="profile-card">
+          <div class="profile-avatar">👤</div>
+          <div class="profile-info">
+            <h2 id="profile-name">-</h2>
+            <p class="profile-meta" id="profile-team">-</p>
+            <span class="disc-badge type-S" id="disc-type">DISC: -</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 統計カード -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📝</div>
+          <div class="stat-value" id="stat-quizzes">0</div>
+          <div class="stat-label">回答数</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-value" id="stat-accuracy">0%</div>
+          <div class="stat-label">正答率</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⭐</div>
+          <div class="stat-value" id="stat-score">0</div>
+          <div class="stat-label">スコア</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎯</div>
+          <div class="stat-value" id="stat-achievement">0%</div>
+          <div class="stat-label">目標達成率</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <!-- スキルレベル -->
+        <div class="card">
+          <div class="card-header">
+            <h2>スキルレベル</h2>
+          </div>
+          <div class="card-body">
+            <div class="skill-bars" id="skill-bars">
+              <!-- JSで生成 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 達成度 & 直近の振り返り -->
+        <div>
+          <!-- 達成度メーター -->
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="card-body">
+              <div class="achievement-meter">
+                <div class="achievement-circle" style="--progress: 0deg;">
+                  <div class="achievement-inner">0%</div>
+                </div>
+                <div style="font-weight: 600;">目標達成率</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 直近の振り返り -->
+          <div class="card">
+            <div class="card-header">
+              <h2>直近の振り返り</h2>
+            </div>
+            <div class="card-body" id="recent-reflection">
+              <!-- JSで生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 今日のTip -->
+      <div class="tip-card" id="random-tip" style="margin-top: 20px;">
+        <!-- JSで生成 -->
+      </div>
+    </div>
+
+    <!-- ===== クイズビュー ===== -->
+    <div id="view-quiz" class="view">
+      <div class="card">
+        <div class="card-header">
+          <h2>スキルアップクイズ</h2>
+        </div>
+        <div class="card-body">
+          <!-- カテゴリ選択 -->
+          <div class="quiz-categories" id="quiz-categories">
+            <!-- JSで生成 -->
+          </div>
+
+          <!-- クイズ本体 -->
+          <div id="quiz-container" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <button class="btn btn-secondary" onclick="backToCategories()">← 戻る</button>
+              <span id="quiz-progress">1 / 5</span>
+            </div>
+            <div class="quiz-question-card" id="quiz-question-container">
+              <!-- JSで生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 振り返りビュー ===== -->
+    <div id="view-reflection" class="view">
+      <div class="card">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <h2>週次振り返り</h2>
+          <button class="btn btn-primary" onclick="openReflectionModal()">+ 新規振り返り</button>
+        </div>
+        <div class="card-body">
+          <div class="reflection-list" id="reflection-list">
+            <!-- JSで生成 -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== TipsビΛュー ===== -->
+    <div id="view-tips" class="view">
+      <div class="card">
+        <div class="card-header">
+          <h2>営業Tips</h2>
+        </div>
+        <div class="card-body">
+          <div id="tips-list">
+            <!-- JSで生成 -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== ローディングオーバーレイ ===== -->
+  <div id="loading-overlay" class="modal-overlay">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p style="margin-top: 15px; color: white;">読み込み中...</p>
+    </div>
+  </div>
+
+  <!-- ===== 振り返りモーダル ===== -->
+  <div id="reflection-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>週次振り返りを入力</h3>
+        <button class="modal-close" onclick="closeModal('reflection-modal')">&times;</button>
+      </div>
+      <form id="reflection-form" class="modal-body">
+        <div class="form-group">
+          <label>直近の気づき・学び</label>
+          <textarea id="ref-insights" placeholder="今週気づいたこと、学んだことを記入してください"></textarea>
+        </div>
+        <div class="form-group">
+          <label>継続している課題</label>
+          <textarea id="ref-challenges" placeholder="まだ解決できていない課題があれば記入してください"></textarea>
+        </div>
+        <div class="form-group">
+          <label>モチベーション（5段階）</label>
+          <select id="ref-motivation">
+            <option value="5">5 - とても高い</option>
+            <option value="4">4 - 高い</option>
+            <option value="3" selected>3 - 普通</option>
+            <option value="2">2 - やや低い</option>
+            <option value="1">1 - 低い</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>来週のアクション</label>
+          <textarea id="ref-actions" placeholder="来週取り組むことを記入してください"></textarea>
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('reflection-modal')">キャンセル</button>
+        <button class="btn btn-primary" onclick="submitReflection()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>会話ログDB</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <!-- ===== ヘッダー ===== -->
+  <header class="header">
+    <div class="header-content">
+      <h1>💬 会話ログDB</h1>
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick="openNewLogModal()">+ 新規ログ</button>
+        <button class="btn btn-secondary" onclick="summarizeCurrentConversation()">📝 要約</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== メインコンテナ ===== -->
+  <div class="main-container">
+    <!-- サイドバー -->
+    <aside class="sidebar">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3 style="margin: 0;">顧客一覧</h3>
+        <button class="btn btn-secondary" onclick="showAllLogs()" style="padding: 5px 10px; font-size: 12px;">全表示</button>
+      </div>
+      <div class="customer-list" id="customer-list">
+        <div class="loading">
+          <div class="spinner"></div>
+        </div>
+      </div>
+
+      <!-- 感情分析チャート -->
+      <div style="margin-top: 20px;">
+        <h3>感情分析</h3>
+        <div class="sentiment-bars" id="sentiment-bars">
+          <!-- JSで生成 -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- メインコンテンツ -->
+    <main class="content">
+      <!-- 統計カード -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">総ログ数</div>
+          <div class="stat-value" id="stat-total-logs">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">本日のログ</div>
+          <div class="stat-value" id="stat-today-logs">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">週間ログ</div>
+          <div class="stat-value" id="stat-week-logs">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">顧客数</div>
+          <div class="stat-value" id="stat-customers">0</div>
+        </div>
+      </div>
+
+      <!-- 会話パネル -->
+      <div class="conversation-panel">
+        <div class="conversation-header">
+          <h2 id="conversation-title">全ての会話ログ</h2>
+        </div>
+
+        <div class="conversation-body" id="conversation-body">
+          <div class="loading">
+            <div class="spinner"></div>
+          </div>
+        </div>
+
+        <div class="input-area">
+          <select id="channel-select">
+            <option value="メール">メール</option>
+            <option value="電話">電話</option>
+            <option value="チャット">チャット</option>
+            <option value="対面">対面</option>
+            <option value="その他">その他</option>
+          </select>
+          <select id="message-type">
+            <option value="受信">受信（顧客から）</option>
+            <option value="送信">送信（担当者から）</option>
+          </select>
+          <input type="text" id="message-input" placeholder="メッセージを入力...（Enterで送信）">
+          <button class="btn btn-primary" onclick="sendMessage()">送信</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== 新規ログモーダル ===== -->
+  <div id="new-log-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>新規ログを追加</h3>
+        <button class="modal-close" onclick="closeModal('new-log-modal')">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label>顧客ID *</label>
+        <input type="text" id="new-log-customer" placeholder="CS-001">
+      </div>
+
+      <div class="form-group">
+        <label>顧客名</label>
+        <input type="text" id="new-log-customer-name" placeholder="株式会社サンプル">
+      </div>
+
+      <div class="form-group">
+        <label>チャネル</label>
+        <select id="new-log-channel">
+          <option value="メール">メール</option>
+          <option value="電話">電話</option>
+          <option value="チャット">チャット</option>
+          <option value="対面">対面</option>
+          <option value="その他">その他</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>メッセージタイプ</label>
+        <select id="new-log-type">
+          <option value="受信">受信（顧客から）</option>
+          <option value="送信">送信（担当者から）</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>メッセージ *</label>
+        <textarea id="new-log-message" placeholder="会話内容を入力..."></textarea>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeModal('new-log-modal')">キャンセル</button>
+        <button class="btn btn-primary" onclick="submitNewLog()">追加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 要約モーダル ===== -->
+  <div id="summary-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>会話の要約</h3>
+        <button class="modal-close" onclick="closeModal('summary-modal')">&times;</button>
+      </div>
+
+      <div id="summary-content">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p style="margin-top: 10px; color: #666;">Gemini APIで要約を生成中...</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 20px; text-align: right;">
+        <button class="btn btn-secondary" onclick="closeModal('summary-modal')">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Node.js files
+node_modules/**
+package.json
+package-lock.json
+
+# Scripts directory (contains Node.js scripts, not GAS)
+scripts/**
+scripts/check-api-integrity.js
+scripts/pre-push.sh
+
+# Other files
+.git/**
+.gitignore
+*.md
+.claspignore
+
+# Deleted HTML files (SPA統一のため削除済み - 2026-01-12)
+# leads.html, deals.html, staff.html, dashboard.html
+# → index.html（SPA）に統合

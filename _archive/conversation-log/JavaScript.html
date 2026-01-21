@@ -1,0 +1,458 @@
+<script>
+/**
+ * 会話ログDB - JavaScript
+ */
+
+// ===== グローバル変数 =====
+let customers = [];
+let currentCustomerId = null;
+let conversationLogs = [];
+let sentimentLabels = {};
+let stats = {};
+
+// ===== 初期化 =====
+let initError = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadInitialData();
+});
+
+function loadInitialData() {
+  initError = false;
+
+  // まずsentimentLabelsを読み込む（これは必ず成功する）
+  google.script.run
+    .withSuccessHandler(function(labels) {
+      sentimentLabels = labels || {};
+    })
+    .withFailureHandler(function(err) {
+      console.error('getSentimentLabels error:', err);
+      sentimentLabels = {};
+    })
+    .getSentimentLabels();
+
+  // 他のデータを読み込む
+  loadDashboardStats();
+  loadCustomersList();
+  loadAllLogs();
+}
+
+// ===== データ読み込み =====
+function loadSentimentLabels() {
+  google.script.run
+    .withSuccessHandler(function(labels) {
+      sentimentLabels = labels || {};
+    })
+    .withFailureHandler(function(err) {
+      console.error('getSentimentLabels error:', err);
+      sentimentLabels = {};
+    })
+    .getSentimentLabels();
+}
+
+function loadDashboardStats() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      stats = data || {};
+      renderStats();
+      renderSentimentChart();
+    })
+    .withFailureHandler(function(err) {
+      console.error('getDashboardStats error:', err);
+      stats = {};
+      checkSetupNeeded(err);
+    })
+    .getDashboardStats();
+}
+
+function loadCustomersList() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      customers = data || [];
+      renderCustomersList();
+    })
+    .withFailureHandler(function(err) {
+      console.error('getCustomersList error:', err);
+      customers = [];
+      checkSetupNeeded(err);
+    })
+    .getCustomersList();
+}
+
+function loadAllLogs() {
+  google.script.run
+    .withSuccessHandler(function(logs) {
+      conversationLogs = logs || [];
+      renderConversation();
+    })
+    .withFailureHandler(function(err) {
+      console.error('getAllLogs error:', err);
+      conversationLogs = [];
+      checkSetupNeeded(err);
+    })
+    .getAllLogs(50);
+}
+
+function checkSetupNeeded(err) {
+  if (initError) return;
+  if (err && err.message && err.message.includes('setupConversationLogSystem')) {
+    initError = true;
+    showSetupWarning();
+  }
+}
+
+function showSetupWarning() {
+  const container = document.querySelector('.main-content') || document.querySelector('.container');
+  if (container) {
+    container.innerHTML = `
+      <div style="padding: 40px; text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 20px;">&#9888;</div>
+        <h2 style="color: #ef4444; margin-bottom: 15px;">セットアップが必要です</h2>
+        <p style="color: #666; margin-bottom: 20px;">
+          スプレッドシートが設定されていません。<br>
+          GASエディタで <code>setupConversationLogSystem()</code> を実行してください。
+        </p>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: left; max-width: 400px; margin: 0 auto;">
+          <p style="font-size: 14px; margin-bottom: 10px;"><strong>手順:</strong></p>
+          <ol style="font-size: 13px; color: #666; margin-left: 20px;">
+            <li>GASエディタを開く</li>
+            <li>setupConversationLogSystem() を実行</li>
+            <li>setInitialConfig({geminiApiKey: "your-key"}) でAPI設定</li>
+            <li>ページをリロード</li>
+          </ol>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function loadCustomerLogs(customerId) {
+  currentCustomerId = customerId;
+
+  // サイドバーのアクティブ状態を更新
+  document.querySelectorAll('.customer-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.dataset.customerId === customerId) {
+      item.classList.add('active');
+    }
+  });
+
+  // ヘッダーを更新
+  const customer = customers.find(c => c.customerId === customerId);
+  document.getElementById('conversation-title').textContent =
+    customer ? `${customer.customerName} との会話` : '会話ログ';
+
+  google.script.run
+    .withSuccessHandler(function(logs) {
+      conversationLogs = logs;
+      renderConversation();
+    })
+    .getConversationLogs(customerId, 100);
+}
+
+// ===== レンダリング =====
+function renderStats() {
+  document.getElementById('stat-total-logs').textContent = stats.totalLogs || 0;
+  document.getElementById('stat-today-logs').textContent = stats.todayLogs || 0;
+  document.getElementById('stat-week-logs').textContent = stats.weekLogs || 0;
+  document.getElementById('stat-customers').textContent = stats.totalCustomers || 0;
+}
+
+function renderSentimentChart() {
+  const container = document.getElementById('sentiment-bars');
+  if (!container) return;
+
+  const breakdown = stats.sentimentBreakdown || {};
+  const total = Object.values(breakdown).reduce((a, b) => a + b, 0) || 1;
+
+  const labels = {
+    'VERY_POSITIVE': { label: '非常にポジティブ', class: 'very-positive' },
+    'POSITIVE': { label: 'ポジティブ', class: 'positive' },
+    'NEUTRAL': { label: 'ニュートラル', class: 'neutral' },
+    'NEGATIVE': { label: 'ネガティブ', class: 'negative' },
+    'VERY_NEGATIVE': { label: '非常にネガティブ', class: 'very-negative' }
+  };
+
+  container.innerHTML = Object.entries(labels).map(([key, info]) => {
+    const count = breakdown[key] || 0;
+    const percentage = (count / total) * 100;
+    return `
+      <div class="sentiment-bar-item">
+        <div class="sentiment-bar-label">${info.label}</div>
+        <div class="sentiment-bar">
+          <div class="sentiment-bar-fill ${info.class}" style="width: ${percentage}%"></div>
+        </div>
+        <div class="sentiment-bar-count">${count}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCustomersList() {
+  const container = document.getElementById('customer-list');
+  if (!container) return;
+
+  if (customers.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>顧客がいません</p></div>';
+    return;
+  }
+
+  container.innerHTML = customers.map(c => `
+    <div class="customer-item ${c.customerId === currentCustomerId ? 'active' : ''}"
+         data-customer-id="${c.customerId}"
+         onclick="loadCustomerLogs('${c.customerId}')">
+      <div class="customer-name">${c.customerName || '名前なし'}</div>
+      <div class="customer-meta">
+        <span>${c.customerId}</span>
+        <span>・</span>
+        <span>${c.conversationCount || 0}件の会話</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderConversation() {
+  const container = document.getElementById('conversation-body');
+  if (!container) return;
+
+  if (conversationLogs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">💬</div>
+        <p>会話ログがありません</p>
+      </div>
+    `;
+    return;
+  }
+
+  // 時系列順に並べる（古い順）
+  const sortedLogs = [...conversationLogs].reverse();
+
+  container.innerHTML = sortedLogs.map(log => {
+    const isOutgoing = log.messageType === '送信';
+    const sentimentClass = getSentimentClass(log.sentiment);
+    const sentimentInfo = sentimentLabels[log.sentiment] || { label: log.sentiment, icon: '😐' };
+    const channelClass = getChannelClass(log.channel);
+
+    return `
+      <div class="message ${isOutgoing ? 'outgoing' : ''}">
+        <div class="message-avatar">
+          ${isOutgoing ? '👤' : '🏢'}
+        </div>
+        <div class="message-content">
+          <div class="message-bubble">
+            ${log.originalMessage}
+          </div>
+          ${log.translatedMessage && log.translatedMessage !== log.originalMessage ? `
+            <div class="message-translation">
+              🌐 ${log.translatedMessage}
+            </div>
+          ` : ''}
+          <div class="message-meta">
+            <span class="channel-badge ${channelClass}">${log.channel || 'その他'}</span>
+            <span class="sentiment-badge ${sentimentClass}">
+              ${sentimentInfo.icon} ${sentimentInfo.label}
+            </span>
+            <span>${formatDateTime(log.timestamp)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // スクロールを最下部へ
+  container.scrollTop = container.scrollHeight;
+}
+
+// ===== メッセージ送信 =====
+function sendMessage() {
+  const input = document.getElementById('message-input');
+  const typeSelect = document.getElementById('message-type');
+  const channelSelect = document.getElementById('channel-select');
+
+  const message = input.value.trim();
+  if (!message) return;
+
+  const customer = customers.find(c => c.customerId === currentCustomerId);
+
+  const data = {
+    customerId: currentCustomerId || 'UNKNOWN',
+    customerName: customer?.customerName || '不明',
+    assigneeId: 'EMP-001',
+    assigneeName: '担当者',
+    channel: channelSelect.value,
+    messageType: typeSelect.value,
+    message: message
+  };
+
+  input.value = '';
+  input.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      input.disabled = false;
+      if (result.success) {
+        // 新しいログを追加
+        conversationLogs.unshift({
+          logId: result.logId,
+          customerId: data.customerId,
+          customerName: data.customerName,
+          assigneeId: data.assigneeId,
+          assigneeName: data.assigneeName,
+          channel: data.channel,
+          messageType: data.messageType,
+          originalMessage: data.message,
+          translatedMessage: result.translatedMessage,
+          sentiment: result.sentiment,
+          sentimentScore: result.sentimentScore,
+          timestamp: new Date().toISOString()
+        });
+        renderConversation();
+        loadDashboardStats();
+      } else {
+        alert('送信に失敗しました: ' + result.error);
+      }
+    })
+    .withFailureHandler(function(error) {
+      input.disabled = false;
+      alert('エラー: ' + error.message);
+    })
+    .addConversationLog(data);
+}
+
+// ===== 会話要約 =====
+function summarizeCurrentConversation() {
+  if (!currentCustomerId) {
+    alert('顧客を選択してください');
+    return;
+  }
+
+  document.getElementById('summary-content').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  showModal('summary-modal');
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        document.getElementById('summary-content').innerHTML = `
+          <div class="summary-card">
+            <h4>会話の要約</h4>
+            <div style="white-space: pre-wrap;">${result.summary}</div>
+          </div>
+        `;
+      } else {
+        document.getElementById('summary-content').innerHTML = `
+          <div class="alert alert-error">要約の生成に失敗しました: ${result.error}</div>
+        `;
+      }
+    })
+    .withFailureHandler(function(error) {
+      document.getElementById('summary-content').innerHTML = `
+        <div class="alert alert-error">エラー: ${error.message}</div>
+      `;
+    })
+    .summarizeConversation(currentCustomerId);
+}
+
+// ===== 新規ログモーダル =====
+function openNewLogModal() {
+  document.getElementById('new-log-customer').value = currentCustomerId || '';
+  showModal('new-log-modal');
+}
+
+function submitNewLog() {
+  const customerId = document.getElementById('new-log-customer').value.trim();
+  const customerName = document.getElementById('new-log-customer-name').value.trim();
+  const channel = document.getElementById('new-log-channel').value;
+  const messageType = document.getElementById('new-log-type').value;
+  const message = document.getElementById('new-log-message').value.trim();
+
+  if (!customerId || !message) {
+    alert('顧客IDとメッセージは必須です');
+    return;
+  }
+
+  const data = {
+    customerId: customerId,
+    customerName: customerName,
+    channel: channel,
+    messageType: messageType,
+    message: message
+  };
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        closeModal('new-log-modal');
+        loadCustomersList();
+        if (currentCustomerId === customerId) {
+          loadCustomerLogs(customerId);
+        }
+        loadDashboardStats();
+      } else {
+        alert('追加に失敗しました: ' + result.error);
+      }
+    })
+    .withFailureHandler(function(error) {
+      alert('エラー: ' + error.message);
+    })
+    .addConversationLog(data);
+}
+
+// ===== ユーティリティ =====
+function getSentimentClass(sentiment) {
+  const map = {
+    'VERY_POSITIVE': 'positive',
+    'POSITIVE': 'positive',
+    'NEUTRAL': 'neutral',
+    'NEGATIVE': 'negative',
+    'VERY_NEGATIVE': 'negative'
+  };
+  return map[sentiment] || 'neutral';
+}
+
+function getChannelClass(channel) {
+  const map = {
+    'メール': 'email',
+    '電話': 'phone',
+    'チャット': 'chat',
+    '対面': 'meeting'
+  };
+  return map[channel] || '';
+}
+
+function formatDateTime(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+// ===== モーダル =====
+function showModal(modalId) {
+  document.getElementById(modalId).classList.add('active');
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.remove('active');
+}
+
+// ===== 全顧客表示 =====
+function showAllLogs() {
+  currentCustomerId = null;
+  document.querySelectorAll('.customer-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  document.getElementById('conversation-title').textContent = '全ての会話ログ';
+  loadAllLogs();
+}
+
+// ===== キーボードショートカット =====
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    const input = document.getElementById('message-input');
+    if (document.activeElement === input) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+});
+</script>

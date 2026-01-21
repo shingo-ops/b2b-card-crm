@@ -1,0 +1,63 @@
+{
+  "version": "1.0.1",
+  "lastUpdated": "2026-01-18",
+  "environments": {
+    "prod": {
+      "name": "Production",
+      "code": "PROD",
+      "folder": "crm-dashboard",
+      "scriptId": "1CQiLiFG8N77uYzlo3UNgAwml9_8mAJYAmfe4thp3RGsvbiwoaS-kS7X0",
+      "spreadsheetId": "1kF-o4jCrbQePktWaFEBvWhJJjRXhkuw5-AcISa4ClAk",
+      "driveFolderId": "1JIPeqiT_2ucBUK875sQBcuSYHkT-GtdD",
+      "rules": "strict",
+      "deployApproval": "human_required",
+      "namingPrefix": "",
+      "description": "本番環境 - 実業務運用"
+    },
+    "dev": {
+      "name": "Development",
+      "code": "DEV",
+      "folder": "crm-dashboard-dev",
+      "scriptId": "1TW14Q78eA1C5MyXdssxACZR4C5mavzjw9SjNLGzdHNCL1QteWuWKg9s7",
+      "spreadsheetId": "1EpqO7HL3o7jTbkvZuHqf8LMU4_RwQTJM8PyRx6Qj6uM",
+      "driveFolderId": "1rV7ZKxZZtCubafp-9lMyCIPgmaAbJjh_",
+      "rules": "standard",
+      "deployApproval": "test_required",
+      "namingPrefix": "[開発]",
+      "description": "開発環境 - 機能開発・テスト"
+    },
+    "prop": {
+      "name": "Proposal",
+      "code": "PROP",
+      "folder": "crm-dashboard-prop",
+      "scriptId": "1l-NZT9RZrCxlwDa2NT9Op7rxHvLAgZYmqUVvYB_TEZEKBx-A2JKl1lWw",
+      "spreadsheetId": "1k2utJ6uoQg2rRDPBgtdxBnkdzGD3ByAq34oyGqbPuYg",
+      "driveFolderId": "1kDfjsZt6k6iXPRC6QRbjM6Kyfz2I1Bm5",
+      "deployId": "AKfycbyXhSH6vfkTvZvBY9N-69_GQzzv8vXJ8cY4nNgx-dI465y6a6swQkJsvLALNXBe8Gwttg",
+      "webAppUrl": "https://script.google.com/macros/s/AKfycbyXhSH6vfkTvZvBY9N-69_GQzzv8vXJ8cY4nNgx-dI465y6a6swQkJsvLALNXBe8Gwttg/exec",
+      "rules": "minimal",
+      "deployApproval": "none",
+      "namingPrefix": "[提案]",
+      "description": "提案環境 - AI自律実験"
+    }
+  },
+  "syncRules": {
+    "prop_to_dev": {
+      "approval": "human_required",
+      "description": "提案環境から開発環境へのコード移行"
+    },
+    "dev_to_prod": {
+      "approval": "human_required",
+      "testRequired": true,
+      "description": "開発環境から本番環境へのコード移行"
+    },
+    "prod_to_dev": {
+      "approval": "none",
+      "description": "本番環境から開発環境へのコード同期（バグ修正用）"
+    },
+    "prod_to_prop": {
+      "approval": "forbidden",
+      "description": "本番環境から提案環境への移行は禁止"
+    }
+  }
+}

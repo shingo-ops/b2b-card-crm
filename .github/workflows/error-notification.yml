@@ -1,0 +1,182 @@
+# 異常検知時の自動通知・Issue作成
+# フロー: 異常検知 → Discord通知 + Issue作成 → 改修依頼
+
+name: Error Notification
+
+on:
+  workflow_run:
+    workflows:
+      - "Scheduled Health Check"
+      - "Security Check"
+      - "Code Quality Check"
+      - "Backup Verification"
+      - "Process Quality Check"
+      - "GAS Pokayoke Check"
+    types:
+      - completed
+
+jobs:
+  notify-on-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get failure details
+        id: failure-info
+        run: |
+          echo "workflow_name=${{ github.event.workflow_run.name }}" >> $GITHUB_OUTPUT
+          echo "run_url=${{ github.event.workflow_run.html_url }}" >> $GITHUB_OUTPUT
+          echo "run_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_BUGREPORT_WEBHOOK }}
+        run: |
+          # Webhook URLが設定されていない場合はスキップ
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "⚠️ DISCORD_WEBHOOK_URL が設定されていません"
+            echo "GitHub Secrets に DISCORD_WEBHOOK_URL を追加してください"
+            exit 0
+          fi
+
+          WORKFLOW_NAME="${{ steps.failure-info.outputs.workflow_name }}"
+          RUN_URL="${{ steps.failure-info.outputs.run_url }}"
+          TIMESTAMP="${{ steps.failure-info.outputs.timestamp }}"
+
+          # Discord通知を送信
+          curl -s -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"🚨 **異常検知**\n\n❌ **失敗したワークフロー**: ${WORKFLOW_NAME}\n📅 **発生日時**: ${TIMESTAMP}\n🔗 **詳細**: ${RUN_URL}\n\n👉 **対応依頼**: Claude Codeで以下を実行してください\n\`\`\`\ncd ~/sales-ops-with-claude && git pull\n# 上記URLのエラーログを確認して修正依頼\n\`\`\`\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+          echo "✅ Discord通知を送信しました"
+
+      - name: Create GitHub Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WORKFLOW_NAME="${{ steps.failure-info.outputs.workflow_name }}"
+          RUN_URL="${{ steps.failure-info.outputs.run_url }}"
+          RUN_ID="${{ steps.failure-info.outputs.run_id }}"
+          TIMESTAMP="${{ steps.failure-info.outputs.timestamp }}"
+
+          # 同じワークフローの未解決Issueがあるかチェック
+          EXISTING=$(gh issue list --label "auto-detected" --label "$WORKFLOW_NAME" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "既存のIssue #$EXISTING があります。コメントを追加します。"
+            gh issue comment "$EXISTING" --body "## 再発検知
+
+**発生日時**: $TIMESTAMP
+**ログ**: $RUN_URL
+
+同じエラーが再度発生しました。"
+          else
+            echo "新規Issueを作成します。"
+            gh issue create \
+              --title "🚨 [自動検知] $WORKFLOW_NAME が失敗" \
+              --label "auto-detected" \
+              --label "$WORKFLOW_NAME" \
+              --label "bug" \
+              --body "## 異常検知レポート
+
+### 概要
+| 項目 | 内容 |
+|------|------|
+| ワークフロー | $WORKFLOW_NAME |
+| 発生日時 | $TIMESTAMP |
+| ログURL | $RUN_URL |
+
+### 対応手順
+
+1. **エラーログを確認**
+   - 上記URLでエラー詳細を確認
+
+2. **Claude Codeで修正依頼**
+   \`\`\`
+   cd ~/sales-ops-with-claude
+   git pull
+   # Claude Codeにエラー内容を伝えて修正依頼
+   \`\`\`
+
+3. **修正後の確認**
+   - git push後、GitHub Actionsが自動で再チェック
+   - PASSしたらこのIssueをクローズ
+
+### チェックリスト
+- [ ] エラー原因を特定した
+- [ ] 修正をコミットした
+- [ ] GitHub ActionsがPASSした
+- [ ] POKA_HISTORY.mdに記録した
+- [ ] 必要に応じてポカヨケを追加した
+
+---
+*このIssueは自動作成されました*"
+          fi
+
+  notify-on-success-after-failure:
+    name: Notify Recovery
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if recovering from failure
+        id: check-recovery
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+
+          # このワークフローの未解決Issueがあるかチェック
+          EXISTING=$(gh issue list --label "auto-detected" --label "$WORKFLOW_NAME" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
+            echo "is_recovery=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_recovery=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send recovery notification
+        if: steps.check-recovery.outputs.is_recovery == 'true'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_BUGREPORT_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            exit 0
+          fi
+
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          ISSUE_NUM="${{ steps.check-recovery.outputs.issue_number }}"
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"✅ **改修完了**\n\n🔧 **復旧したワークフロー**: ${WORKFLOW_NAME}\n📋 **関連Issue**: #${ISSUE_NUM}\n\n👉 Issue #${ISSUE_NUM} をクローズしてください\"
+            }" \
+            "$DISCORD_WEBHOOK"
+
+          echo "✅ 復旧通知を送信しました"
+
+      - name: Comment on issue
+        if: steps.check-recovery.outputs.is_recovery == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM="${{ steps.check-recovery.outputs.issue_number }}"
+
+          gh issue comment "$ISSUE_NUM" --body "## ✅ 改修完了
+
+GitHub Actionsが正常にPASSしました。
+
+### 残りの作業
+- [ ] POKA_HISTORY.mdに記録したか確認
+- [ ] このIssueをクローズ"

@@ -1,0 +1,161 @@
+# 定期ヘルスチェック
+# KGI: ポカヨケ稼働率 100%維持
+# 毎日0時（UTC）にポカヨケテストを自動実行
+
+name: Scheduled Health Check
+
+on:
+  schedule:
+    # 毎日9時（JST = UTC+9、つまりUTC 0時）に実行
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  pokayoke-health-check:
+    name: Pokayoke Health Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run pokayoke tests
+        id: pokayoke-test
+        run: |
+          echo "==========================================="
+          echo "定期ヘルスチェック: ポカヨケテスト"
+          echo "実行日時: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "==========================================="
+          echo ""
+
+          # test-pokayoke.shに実行権限を付与
+          chmod +x scripts/test-pokayoke.sh
+
+          # ポカヨケテスト実行
+          if ./scripts/test-pokayoke.sh; then
+            echo "health_status=healthy" >> $GITHUB_OUTPUT
+            echo ""
+            echo "✅ ヘルスチェック: 正常"
+          else
+            echo "health_status=unhealthy" >> $GITHUB_OUTPUT
+            echo ""
+            echo "❌ ヘルスチェック: 異常検出"
+            exit 1
+          fi
+
+      - name: Check PROCESS_QUALITY integrity
+        run: |
+          echo "==========================================="
+          echo "PROCESS_QUALITY整合性チェック"
+          echo "==========================================="
+          echo ""
+
+          ERRORS=0
+
+          # 全工程フォルダの3ファイル存在確認
+          for DIR in docs/00_common/PROCESS_QUALITY/*/; do
+            if [ -d "$DIR" ]; then
+              proc=$(basename "$DIR")
+              if [[ "$proc" =~ ^[0-9]{2}_ ]]; then
+                for file in POKAYOKE.md TROUBLE_LOG.md POKA_HISTORY.md; do
+                  if [ ! -f "$DIR$file" ]; then
+                    echo "❌ $proc/$file が存在しません"
+                    ERRORS=$((ERRORS + 1))
+                  fi
+                done
+              fi
+            fi
+          done
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "✅ 全工程ファイル構造: 正常"
+          else
+            echo "❌ $ERRORS 件のファイル欠落"
+            exit 1
+          fi
+
+      - name: Check scripts executable
+        run: |
+          echo "==========================================="
+          echo "スクリプト実行権限チェック"
+          echo "==========================================="
+          echo ""
+
+          SCRIPTS=(
+            "scripts/check-sync.sh"
+            "scripts/add-new-process.sh"
+            "scripts/aggregate-kpi.sh"
+            "scripts/test-pokayoke.sh"
+          )
+
+          ERRORS=0
+          for script in "${SCRIPTS[@]}"; do
+            if [ -f "$script" ]; then
+              chmod +x "$script"
+              echo "✅ $script: 実行可能"
+            else
+              echo "❌ $script: 存在しません"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: Generate health report
+        if: always()
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "ヘルスレポート"
+          echo "==========================================="
+          echo ""
+          echo "| 項目 | 状態 |"
+          echo "|------|------|"
+          echo "| 実行日時 | $(date '+%Y-%m-%d %H:%M:%S') |"
+          echo "| ポカヨケテスト | ${{ steps.pokayoke-test.outputs.health_status || 'unknown' }} |"
+          echo "| KGI | 稼働率100%維持 |"
+          echo ""
+
+  # システム自体のポカヨケ: ワークフロー構文チェック
+  workflow-self-check:
+    name: Workflow Self Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate workflow files
+        run: |
+          echo "==========================================="
+          echo "ワークフロー構文チェック"
+          echo "==========================================="
+          echo ""
+
+          # GitHub Actionsワークフローファイルの存在確認
+          REQUIRED_WORKFLOWS=(
+            ".github/workflows/gas-pokayoke.yml"
+            ".github/workflows/process-quality-check.yml"
+            ".github/workflows/scheduled-health-check.yml"
+          )
+
+          ERRORS=0
+          for workflow in "${REQUIRED_WORKFLOWS[@]}"; do
+            if [ -f "$workflow" ]; then
+              echo "✅ $workflow: 存在"
+            else
+              echo "❌ $workflow: 存在しません"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::必須ワークフローが欠落しています"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ 全ワークフロー: 正常"

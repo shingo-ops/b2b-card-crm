@@ -1,0 +1,262 @@
+# GAS ポカヨケ（Poka-yoke）チェック
+# TROUBLE-018対応: LockService未使用を自動検出
+# Phase 4: ポカ検出時にPOKA-ID形式で出力（手動記録用）
+
+name: GAS Pokayoke Check
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.gs'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.gs'
+
+jobs:
+  lockservice-check:
+    name: LockService Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for insertSheet without LockService
+        id: check-insert
+        run: |
+          echo "=== Checking insertSheet usage ==="
+
+          # insertSheetを使用しているファイルを検索
+          INSERT_FILES=$(grep -rl "insertSheet" --include="*.gs" . 2>/dev/null || true)
+
+          if [ -z "$INSERT_FILES" ]; then
+            echo "No insertSheet usage found. OK."
+            exit 0
+          fi
+
+          echo "Files using insertSheet:"
+          echo "$INSERT_FILES"
+
+          ERRORS=0
+          for file in $INSERT_FILES; do
+            echo ""
+            echo "Checking: $file"
+
+            # LockServiceが同じファイルにあるか確認
+            if ! grep -q "LockService" "$file"; then
+              echo "::error file=$file::insertSheet() found without LockService. See CLAUDE.md Section 11."
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "OK: LockService found in $file"
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::$ERRORS file(s) missing LockService for insertSheet()"
+            echo "See: TROUBLE-018, CLAUDE.md Section 11"
+            exit 1
+          fi
+
+      - name: Check for deleteSheet without LockService
+        id: check-delete
+        run: |
+          echo "=== Checking deleteSheet usage ==="
+
+          # deleteSheetを使用しているファイルを検索
+          DELETE_FILES=$(grep -rl "deleteSheet" --include="*.gs" . 2>/dev/null || true)
+
+          if [ -z "$DELETE_FILES" ]; then
+            echo "No deleteSheet usage found. OK."
+            exit 0
+          fi
+
+          echo "Files using deleteSheet:"
+          echo "$DELETE_FILES"
+
+          ERRORS=0
+          for file in $DELETE_FILES; do
+            echo ""
+            echo "Checking: $file"
+
+            # LockServiceが同じファイルにあるか確認
+            if ! grep -q "LockService" "$file"; then
+              echo "::error file=$file::deleteSheet() found without LockService. See CLAUDE.md Section 11."
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "OK: LockService found in $file"
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::$ERRORS file(s) missing LockService for deleteSheet()"
+            echo "See: TROUBLE-018, CLAUDE.md Section 11"
+            exit 1
+          fi
+
+      - name: Check for releaseLock in finally
+        id: check-finally
+        run: |
+          echo "=== Checking releaseLock usage ==="
+
+          # LockServiceを使用しているファイルを検索
+          LOCK_FILES=$(grep -rl "LockService" --include="*.gs" . 2>/dev/null || true)
+
+          if [ -z "$LOCK_FILES" ]; then
+            echo "No LockService usage found."
+            exit 0
+          fi
+
+          WARNINGS=0
+          for file in $LOCK_FILES; do
+            echo ""
+            echo "Checking: $file"
+
+            # releaseLockがあるか確認
+            if ! grep -q "releaseLock" "$file"; then
+              echo "::warning file=$file::LockService used but releaseLock() not found. Ensure proper lock release."
+              WARNINGS=$((WARNINGS + 1))
+            else
+              echo "OK: releaseLock found in $file"
+            fi
+          done
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo ""
+            echo "::warning::$WARNINGS file(s) may have improper lock release"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "GAS Pokayoke Check Complete"
+          echo "=========================================="
+          echo ""
+          echo "Rules checked:"
+          echo "1. insertSheet() requires LockService"
+          echo "2. deleteSheet() requires LockService"
+          echo "3. LockService requires releaseLock()"
+          echo ""
+          echo "Reference: CLAUDE.md Section 11, TROUBLE-018"
+
+      - name: Output POKA record format (on failure)
+        if: failure()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "POKA_HISTORY.md 記録用フォーマット"
+          echo "=========================================="
+          echo ""
+          echo "| $(date +%Y-%m-%d) | POKA-03-XXX | A | LockService未使用 | ルール違反 | GAS-001 | GitHub Actions |"
+          echo ""
+          echo "工程: 03_GAS_EDITOR"
+          echo "記録先: docs/00_common/PROCESS_QUALITY/03_GAS_EDITOR/POKA_HISTORY.md"
+          echo ""
+          echo "Claude Codeは上記をPOKA_HISTORY.mdに手動で記録してください。"
+
+  # TROUBLE-019対応: CRM環境フォルダの同期チェック
+  crm-sync-check:
+    name: CRM Folder Sync Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CRM folder synchronization
+        id: sync-check
+        run: |
+          echo "=== Checking CRM environment folder sync ==="
+          echo "Folders: crm-dashboard, crm-dashboard-dev, crm-dashboard-prop"
+          echo ""
+
+          # フォルダが存在するか確認
+          if [ ! -d "crm-dashboard" ]; then
+            echo "crm-dashboard not found, skipping sync check"
+            exit 0
+          fi
+
+          ERRORS=0
+
+          # GSファイルの同期チェック（.clasp.jsonとappsscript.jsonは除外）
+          for file in crm-dashboard/*.gs crm-dashboard/*.html; do
+            if [ ! -f "$file" ]; then
+              continue
+            fi
+
+            filename=$(basename "$file")
+            echo "Checking: $filename"
+
+            # crm-dashboard-dev との比較
+            if [ -d "crm-dashboard-dev" ]; then
+              if [ -f "crm-dashboard-dev/$filename" ]; then
+                if ! diff -q "crm-dashboard/$filename" "crm-dashboard-dev/$filename" > /dev/null 2>&1; then
+                  echo "::error file=crm-dashboard/$filename::Out of sync with crm-dashboard-dev/$filename. See CLAUDE.md Section 12."
+                  ERRORS=$((ERRORS + 1))
+                fi
+              else
+                echo "::warning file=crm-dashboard/$filename::File missing in crm-dashboard-dev/"
+              fi
+            fi
+
+            # crm-dashboard-prop との比較
+            if [ -d "crm-dashboard-prop" ]; then
+              if [ -f "crm-dashboard-prop/$filename" ]; then
+                if ! diff -q "crm-dashboard/$filename" "crm-dashboard-prop/$filename" > /dev/null 2>&1; then
+                  echo "::error file=crm-dashboard/$filename::Out of sync with crm-dashboard-prop/$filename. See CLAUDE.md Section 12."
+                  ERRORS=$((ERRORS + 1))
+                fi
+              else
+                echo "::warning file=crm-dashboard/$filename::File missing in crm-dashboard-prop/"
+              fi
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::$ERRORS file(s) out of sync between CRM environment folders"
+            echo "See: TROUBLE-019, CLAUDE.md Section 12"
+            echo ""
+            echo "Fix: Copy files to sync all folders"
+            echo "  cp crm-dashboard/*.gs crm-dashboard-dev/"
+            echo "  cp crm-dashboard/*.gs crm-dashboard-prop/"
+            exit 1
+          fi
+
+          echo ""
+          echo "All CRM environment folders are in sync."
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "CRM Sync Check Complete"
+          echo "=========================================="
+          echo ""
+          echo "Folders checked:"
+          echo "- crm-dashboard (main)"
+          echo "- crm-dashboard-dev (dev)"
+          echo "- crm-dashboard-prop (prop)"
+          echo ""
+          echo "Reference: CLAUDE.md Section 12, TROUBLE-019"
+
+      - name: Output POKA record format (on failure)
+        if: failure()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "POKA_HISTORY.md 記録用フォーマット"
+          echo "=========================================="
+          echo ""
+          echo "| $(date +%Y-%m-%d) | POKA-03-XXX | A | 環境フォルダ同期漏れ | 同期忘れ | GAS-002 | GitHub Actions |"
+          echo ""
+          echo "工程: 03_GAS_EDITOR"
+          echo "記録先: docs/00_common/PROCESS_QUALITY/03_GAS_EDITOR/POKA_HISTORY.md"
+          echo ""
+          echo "Claude Codeは上記をPOKA_HISTORY.mdに手動で記録してください。"

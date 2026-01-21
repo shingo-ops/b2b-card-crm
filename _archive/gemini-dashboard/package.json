@@ -1,0 +1,15 @@
+{
+  "name": "gemini-usage-dashboard",
+  "version": "1.0.0",
+  "description": "Gemini API Usage Dashboard - 提案環境",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "author": "Claude Code + Gemini Pro",
+  "license": "MIT"
+}

@@ -1,0 +1,1770 @@
+<script>
+/**
+ * 統合ダッシュボード - Frontend Script
+ * XSS対策適用済み (textContentを使用)
+ */
+
+// Current data cache
+let dashboardData = null;
+
+// Tab name to title mapping
+const TAB_TITLES = {
+  dashboard: 'KGI分析ダッシュボード',
+  gemini: 'Gemini 利用状況',
+  claude: 'Claude 利用状況',
+  defect: '不具合管理',
+  pokayoke: 'ポカヨケ一覧',
+  projects: '関連プロジェクト',
+  conversation: '会話ログ',
+  tps: 'TPS設計原則',
+  'env-system': '3環境システム',
+  specs: '仕様書',
+  philosophy: 'ページ概要',
+  notifications: 'お知らせ',
+  'settings-policy': 'Claude Code設定ポリシー'
+};
+
+// お知らせデータキャッシュ
+let cachedNotifications = [];
+let currentNotificationFilter = 'all';
+
+// ポカヨケデータキャッシュ（フィルター用）
+let cachedPokayokeData = [];
+
+// 許可設定データキャッシュ（FEATURE-008）
+let cachedPolicyData = [];
+let currentPolicyFilter = 'all';
+
+// Tab switching
+function switchTab(tabName) {
+  // Update nav items (sidebar)
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.dataset.tab === tabName) {
+      item.classList.add('active');
+    }
+  });
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  document.getElementById('tab-' + tabName).classList.add('active');
+
+  // Update page title
+  const pageTitle = document.getElementById('pageTitle');
+  if (pageTitle && TAB_TITLES[tabName]) {
+    pageTitle.textContent = TAB_TITLES[tabName];
+  }
+}
+
+// Fetch all dashboard data (GitHub版 - Spreadsheet不使用)
+function fetchAllData() {
+  const refreshBtn = document.getElementById('refreshBtn');
+  const refreshBtnText = refreshBtn.querySelector('span');
+
+  refreshBtn.disabled = true;
+  if (refreshBtnText) {
+    refreshBtnText.textContent = 'Loading...';
+  }
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      dashboardData = data;
+      updateAllUI(data);
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('mainContent').style.display = 'block';
+      refreshBtn.disabled = false;
+      if (refreshBtnText) {
+        refreshBtnText.textContent = 'Refresh';
+      }
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching data:', error);
+      showError(error);
+      refreshBtn.disabled = false;
+      if (refreshBtnText) {
+        refreshBtnText.textContent = 'Refresh';
+      }
+    })
+    .getAllDashboardDataFromGitHub();
+}
+
+// Show error message
+function showError(error) {
+  const loadingEl = document.getElementById('loading');
+  loadingEl.innerHTML = '';
+
+  const p1 = document.createElement('p');
+  p1.style.color = '#ea4335';
+  p1.textContent = 'Error loading data';
+
+  const p2 = document.createElement('p');
+  p2.style.marginTop = '10px';
+  p2.style.fontSize = '0.9rem';
+  p2.textContent = error.message || String(error);
+
+  const btn = document.createElement('button');
+  btn.className = 'refresh-btn';
+  btn.style.marginTop = '20px';
+  btn.onclick = fetchAllData;
+
+  const btnText = document.createElement('span');
+  btnText.textContent = 'Retry';
+  btn.appendChild(btnText);
+
+  loadingEl.append(p1, p2, btn);
+  loadingEl.style.display = 'flex';
+  document.getElementById('mainContent').style.display = 'none';
+}
+
+// Update all UI components (GitHub版)
+function updateAllUI(data) {
+  // GitHub版: conversation, trouble データのみ
+  if (data.source === 'github') {
+    // 会話ログ更新
+    if (data.conversation && data.conversation.success) {
+      updateConversationFromGitHub(data.conversation);
+    }
+
+    // 過去トラ更新
+    if (data.trouble && data.trouble.success) {
+      updateTroubleFromGitHub(data.trouble);
+      // ポカヨケ更新も同じデータから
+      updatePokayokeFromGitHub(data.trouble);
+    }
+
+    // ヘッダー更新
+    const healthEl = document.getElementById('healthScore');
+    if (healthEl) {
+      const score = calculateHealthFromGitHub(data);
+      healthEl.textContent = 'Health: ' + score;
+      healthEl.style.background = getHealthColor(score);
+    }
+
+    // 最終更新
+    document.getElementById('lastUpdated').textContent = new Date(data.fetched_at).toLocaleString('ja-JP');
+  } else {
+    // 旧Spreadsheet版（後方互換）
+    updateDashboardTab(data.summary);
+    updateGeminiTab(data.gemini, data.geminiHistory);
+    updateClaudeTab(data.claude, data.claudeHistory);
+    updateDefectTab(data.defect);
+    updateProjectsTab(data.projects);
+
+    // TPS原則タブ更新
+    if (data.tpsRules) {
+      updateTPSTab(data.tpsRules);
+    }
+
+    const healthScore = data.summary.health_score;
+    const healthEl = document.getElementById('healthScore');
+    healthEl.textContent = 'Health: ' + healthScore;
+    healthEl.style.background = getHealthColor(healthScore);
+
+    const updatedTime = new Date(data.summary.updated_at);
+    document.getElementById('lastUpdated').textContent = updatedTime.toLocaleString('ja-JP');
+    fetchDashboardKGI();
+  }
+}
+
+// GitHubデータからHealth Score計算
+function calculateHealthFromGitHub(data) {
+  let score = 100;
+  if (data.trouble && data.trouble.stats) {
+    // 再発があれば減点
+    score -= data.trouble.stats.recurrence_count * 10;
+    // 過去トラが多ければ減点
+    score -= Math.min(data.trouble.stats.total, 5) * 2;
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
+// GitHubから取得した会話ログでUI更新
+function updateConversationFromGitHub(convData) {
+  const stats = convData.stats;
+
+  // KGI表示更新（dashboardタブ + conversationタブ両方）
+  const zeroInterventionIds = ['zeroInterventionDays', 'convZeroInterventionDays'];
+  const dates = Object.keys(stats.by_date).sort();
+  let diffDays = 0;
+  if (dates.length > 0) {
+    const lastDate = dates[dates.length - 1];
+    // タイムゾーンを考慮して日付のみで比較
+    const lastDateParts = lastDate.split('-');
+    const lastDateLocal = new Date(lastDateParts[0], lastDateParts[1] - 1, lastDateParts[2]);
+    const today = new Date();
+    const todayLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    diffDays = Math.floor((todayLocal - lastDateLocal) / (1000 * 60 * 60 * 24));
+    // 負の値は0に
+    if (diffDays < 0) diffDays = 0;
+  }
+  zeroInterventionIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = diffDays;
+  });
+
+  // カテゴリ別カウント（dashboardタブ: quarter-*, conversationタブ: conv-quarter-*）
+  const categoryMappings = [
+    { category: '指摘', ids: ['quarter-feedback', 'conv-quarter-feedback'] },
+    { category: '依頼', ids: ['quarter-request', 'conv-quarter-request'] },
+    { category: '説明', ids: ['quarter-question', 'conv-quarter-question'] }
+  ];
+
+  categoryMappings.forEach(mapping => {
+    const count = stats.by_category[mapping.category] || 0;
+    mapping.ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = count;
+    });
+  });
+
+  // 解釈率計算: (依頼+説明) / (指摘+依頼+説明) * 100
+  // 指摘が少ないほど解釈率が高い
+  const feedback = stats.by_category['指摘'] || 0;
+  const request = stats.by_category['依頼'] || 0;
+  const question = stats.by_category['説明'] || 0;
+  const total = feedback + request + question;
+  let interpretationRate = 100;
+  if (total > 0) {
+    interpretationRate = Math.round(((request + question) / total) * 100);
+  }
+  const interpretationEl = document.getElementById('convInterpretationScore');
+  if (interpretationEl) {
+    interpretationEl.innerHTML = interpretationRate + '<span class="unified-card-unit">%</span>';
+  }
+  const dashboardInterpretationEl = document.getElementById('interpretationScore');
+  if (dashboardInterpretationEl) {
+    dashboardInterpretationEl.textContent = interpretationRate;
+  }
+
+  // 直近7日間の計算
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+  let weekFeedback = 0, weekRequest = 0, weekQuestion = 0;
+
+  if (convData.conversations) {
+    convData.conversations.forEach(conv => {
+      const convDate = new Date(conv.date);
+      if (convDate >= sevenDaysAgo) {
+        if (conv.category === '指摘') weekFeedback++;
+        else if (conv.category === '依頼') weekRequest++;
+        else if (conv.category === '説明') weekQuestion++;
+      }
+    });
+  }
+
+  // 直近7日間を更新
+  const weekIds = [
+    { id: 'conv-week-feedback', value: weekFeedback },
+    { id: 'conv-week-request', value: weekRequest },
+    { id: 'conv-week-question', value: weekQuestion }
+  ];
+  weekIds.forEach(item => {
+    const el = document.getElementById(item.id);
+    if (el) el.textContent = item.value;
+  });
+
+  // 会話ログ一覧更新
+  updateConversationList(convData.conversations);
+}
+
+// GitHubから取得した過去トラでUI更新
+function updateTroubleFromGitHub(troubleData) {
+  const stats = troubleData.stats;
+  const troubles = troubleData.troubles || [];
+
+  // 0不良日連続達成（最終不具合日からの日数）
+  const defectStreakEl = document.getElementById('defectStreak');
+  if (defectStreakEl && troubles.length > 0) {
+    const lastTrouble = troubles[0]; // 最新が先頭
+    if (lastTrouble.date) {
+      const lastDate = new Date(lastTrouble.date.replace(/\//g, '-'));
+      const today = new Date();
+      const diffDays = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+      defectStreakEl.textContent = diffDays;
+    }
+  }
+
+  // 再発数（KPI）
+  const recurrenceKPIEl = document.getElementById('defectRecurrenceKPI');
+  if (recurrenceKPIEl) {
+    recurrenceKPIEl.innerHTML = (stats.recurrence_count || 0) + '<span class="unified-card-unit">件</span>';
+  }
+
+  // 3ヶ月統計
+  const quarterTotalEl = document.getElementById('defect-quarter-total');
+  const quarterRecurrenceEl = document.getElementById('defect-quarter-recurrence');
+  if (quarterTotalEl) quarterTotalEl.textContent = stats.total || 0;
+  if (quarterRecurrenceEl) quarterRecurrenceEl.textContent = stats.recurrence_count || 0;
+
+  // 最終不具合日
+  const lastDateEl = document.getElementById('defect-last-date');
+  if (lastDateEl && troubles.length > 0) {
+    lastDateEl.textContent = troubles[0].date || '--';
+  }
+
+  // ダッシュボードのバグ・再発カード更新
+  const bugEl = document.getElementById('quarter-bug');
+  const recurrenceEl = document.getElementById('quarter-recurrence');
+  if (bugEl) bugEl.textContent = stats.total || 0;
+  if (recurrenceEl) recurrenceEl.textContent = stats.recurrence_count || 0;
+
+  // 過去トラ一覧更新
+  updateTroubleTable(troubles);
+}
+
+// 会話ログ一覧更新（リスト形式）
+function updateConversationList(conversations) {
+  const container = document.getElementById('conversationLogList');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  if (!conversations || conversations.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'データがありません';
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const conv of conversations) {
+    const item = document.createElement('div');
+    item.className = 'log-item clickable';
+
+    // クリックで詳細表示
+    item.onclick = function() {
+      showConversationDetail(conv);
+    };
+
+    // ヘッダー行: 日時 + カテゴリバッジ + プロジェクト
+    const header = document.createElement('div');
+    header.className = 'log-header';
+
+    const time = document.createElement('span');
+    time.className = 'log-id';
+    time.textContent = conv.timestamp;
+    header.appendChild(time);
+
+    const badge = document.createElement('span');
+    badge.className = 'log-category ' + getCategoryClass(conv.category);
+    badge.textContent = conv.category;
+    header.appendChild(badge);
+
+    const project = document.createElement('span');
+    project.className = 'log-project';
+    project.textContent = conv.project;
+    header.appendChild(project);
+
+    item.appendChild(header);
+
+    // 内容（省略表示）
+    const content = document.createElement('div');
+    content.className = 'log-content';
+    content.textContent = conv.content.length > 100 ? conv.content.substring(0, 100) + '...' : conv.content;
+    item.appendChild(content);
+
+    container.appendChild(item);
+  }
+}
+
+// カテゴリCSSクラス取得
+function getCategoryClass(category) {
+  switch (category) {
+    case '指摘': return 'feedback';
+    case '依頼': return 'request';
+    case '説明': return 'question';
+    default: return '';
+  }
+}
+
+// カテゴリバッジクラス
+function getCategoryBadgeClass(category) {
+  switch (category) {
+    case '指摘': return 'red';
+    case '依頼': return 'blue';
+    case '説明': return 'yellow';
+    default: return 'gray';
+  }
+}
+
+// 過去トラテーブル更新
+function updateTroubleTable(troubles) {
+  const tbody = document.getElementById('defectTableBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+
+  if (!troubles || troubles.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'log-empty';
+    td.textContent = '不具合の記録はありません';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const t of troubles) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+
+    // クリックで詳細表示
+    tr.onclick = function() {
+      showTroubleDetail(t);
+    };
+
+    // 発生日
+    const tdDate = document.createElement('td');
+    tdDate.textContent = t.date || '-';
+    tr.appendChild(tdDate);
+
+    // ID
+    const tdId = document.createElement('td');
+    tdId.textContent = t.id;
+    tdId.style.fontFamily = "'SF Mono', 'Consolas', monospace";
+    tdId.style.color = '#58a6ff';
+    tr.appendChild(tdId);
+
+    // タイトル
+    const tdTitle = document.createElement('td');
+    tdTitle.textContent = t.title.length > 40 ? t.title.substring(0, 40) + '...' : t.title;
+    tr.appendChild(tdTitle);
+
+    // 再発
+    const tdRecurrence = document.createElement('td');
+    tdRecurrence.textContent = t.is_recurrence ? '再発' : '-';
+    if (t.is_recurrence) {
+      tdRecurrence.style.color = '#f85149';
+      tdRecurrence.style.fontWeight = 'bold';
+    }
+    tr.appendChild(tdRecurrence);
+
+    tbody.appendChild(tr);
+  }
+}
+
+// GitHubから取得した過去トラでポカヨケUI更新
+function updatePokayokeFromGitHub(troubleData) {
+  const troubles = troubleData.troubles || [];
+
+  // ポカヨケがある過去トラを抽出
+  const troublesWithPokayoke = troubles.filter(t => t.pokayoke && t.pokayoke.trim());
+  cachedPokayokeData = troublesWithPokayoke;
+
+  // 統計更新
+  const pokayokeCountEl = document.getElementById('pokayokeCount');
+  const troubleWithPokayokeCountEl = document.getElementById('troubleWithPokayokeCount');
+  if (pokayokeCountEl) pokayokeCountEl.textContent = troublesWithPokayoke.length;
+  if (troubleWithPokayokeCountEl) troubleWithPokayokeCountEl.textContent = troublesWithPokayoke.length;
+
+  // グリッド更新
+  renderPokayokeGrid(troublesWithPokayoke);
+}
+
+// ポカヨケグリッドをレンダリング
+function renderPokayokeGrid(troubles) {
+  const grid = document.getElementById('pokayokeGrid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+
+  if (!troubles || troubles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.style.gridColumn = '1/-1';
+    empty.textContent = 'ポカヨケが設置された過去トラはありません';
+    grid.appendChild(empty);
+    return;
+  }
+
+  for (const t of troubles) {
+    const card = document.createElement('div');
+    card.className = 'pokayoke-card';
+    card.onclick = function() {
+      showTroubleDetail(t);
+    };
+
+    // ヘッダー
+    const header = document.createElement('div');
+    header.className = 'pokayoke-header';
+
+    const id = document.createElement('span');
+    id.className = 'pokayoke-id';
+    id.textContent = t.id;
+    header.appendChild(id);
+
+    if (t.category) {
+      const category = document.createElement('span');
+      category.className = 'pokayoke-trouble-id';
+      category.textContent = t.category;
+      header.appendChild(category);
+    }
+
+    card.appendChild(header);
+
+    // タイトル
+    const title = document.createElement('div');
+    title.className = 'pokayoke-title';
+    title.textContent = t.title.length > 50 ? t.title.substring(0, 50) + '...' : t.title;
+    card.appendChild(title);
+
+    // ポカヨケ内容
+    const content = document.createElement('div');
+    content.className = 'pokayoke-content';
+    content.textContent = t.pokayoke.length > 120 ? t.pokayoke.substring(0, 120) + '...' : t.pokayoke;
+    card.appendChild(content);
+
+    grid.appendChild(card);
+  }
+}
+
+// ポカヨケフィルター
+function filterPokayoke(category) {
+  // ボタンのアクティブ状態を更新
+  document.querySelectorAll('.pokayoke-filter-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if ((category === 'all' && btn.textContent === 'すべて') ||
+        btn.textContent === category) {
+      btn.classList.add('active');
+    }
+  });
+
+  // フィルタリング
+  if (category === 'all') {
+    renderPokayokeGrid(cachedPokayokeData);
+  } else {
+    const filtered = cachedPokayokeData.filter(t => t.category === category);
+    renderPokayokeGrid(filtered);
+  }
+}
+
+// Get health color based on score
+function getHealthColor(score) {
+  if (score >= 80) return '#34a853';
+  if (score >= 60) return '#fbbc04';
+  if (score >= 40) return '#ff6d00';
+  return '#ea4335';
+}
+
+// Update Dashboard Tab (KGI分析)
+function updateDashboardTab(summary) {
+  // Zero defect streak is shown in hero
+  const zeroInterventionEl = document.getElementById('zeroInterventionDays');
+  if (zeroInterventionEl) {
+    zeroInterventionEl.textContent = summary.zero_defect_days || 0;
+  }
+
+  // Interpretation score (placeholder - actual calculation in KGI fetch)
+  const interpretationEl = document.getElementById('interpretationScore');
+  if (interpretationEl) {
+    interpretationEl.textContent = '100';
+  }
+}
+
+// Fetch KGI data for dashboard tab and conversation tab
+function fetchDashboardKGI() {
+  google.script.run
+    .withSuccessHandler(function(kgi) {
+      // ===== Dashboard Tab =====
+      // Update 0 intervention days
+      const zeroInterventionEl = document.getElementById('zeroInterventionDays');
+      if (zeroInterventionEl) {
+        zeroInterventionEl.textContent = kgi.zero_intervention_days || 0;
+      }
+
+      // Update quarter stats (3 months) - Dashboard
+      const quarterFeedback = document.getElementById('quarter-feedback');
+      if (quarterFeedback) quarterFeedback.textContent = kgi.quarter_stats?.feedback || 0;
+
+      const quarterRequest = document.getElementById('quarter-request');
+      if (quarterRequest) quarterRequest.textContent = kgi.quarter_stats?.request || 0;
+
+      const quarterQuestion = document.getElementById('quarter-question');
+      if (quarterQuestion) quarterQuestion.textContent = kgi.quarter_stats?.question || 0;
+
+      const quarterBug = document.getElementById('quarter-bug');
+      if (quarterBug) quarterBug.textContent = kgi.quarter_stats?.bug || 0;
+
+      const quarterRecurrence = document.getElementById('quarter-recurrence');
+      if (quarterRecurrence) quarterRecurrence.textContent = kgi.quarter_stats?.recurrence || 0;
+
+      // Update week stats (7 days) - Dashboard
+      const weekFeedbackEl = document.getElementById('week-feedback');
+      if (weekFeedbackEl) weekFeedbackEl.textContent = kgi.last_7_days?.feedback || 0;
+
+      const weekRequestEl = document.getElementById('week-request');
+      if (weekRequestEl) weekRequestEl.textContent = kgi.last_7_days?.request || 0;
+
+      const weekQuestionEl = document.getElementById('week-question');
+      if (weekQuestionEl) weekQuestionEl.textContent = kgi.last_7_days?.question || 0;
+
+      const weekBugEl = document.getElementById('week-bug');
+      if (weekBugEl) weekBugEl.textContent = kgi.last_7_days?.bug || 0;
+
+      const weekRecurrenceEl = document.getElementById('week-recurrence');
+      if (weekRecurrenceEl) weekRecurrenceEl.textContent = kgi.last_7_days?.recurrence || 0;
+
+      // Update interpretation score
+      const interpretationEl = document.getElementById('interpretationScore');
+      if (interpretationEl) {
+        interpretationEl.textContent = kgi.interpretation_rate || 100;
+      }
+
+      // ===== Conversation Tab (同じデータを使用) =====
+      // Update 0 intervention days (KGI)
+      const convZeroEl = document.getElementById('convZeroInterventionDays');
+      if (convZeroEl) {
+        convZeroEl.textContent = kgi.zero_intervention_days || 0;
+      }
+
+      // Update interpretation score (KPI)
+      const convInterpretationEl = document.getElementById('convInterpretationScore');
+      if (convInterpretationEl) {
+        convInterpretationEl.innerHTML = (kgi.interpretation_rate || 100) + '<span class="kgi-card-unit">%</span>';
+      }
+
+      // Update quarter stats (3 months) - Conversation
+      const convQuarterFeedback = document.getElementById('conv-quarter-feedback');
+      if (convQuarterFeedback) convQuarterFeedback.textContent = kgi.quarter_stats?.feedback || 0;
+
+      const convQuarterRequest = document.getElementById('conv-quarter-request');
+      if (convQuarterRequest) convQuarterRequest.textContent = kgi.quarter_stats?.request || 0;
+
+      const convQuarterQuestion = document.getElementById('conv-quarter-question');
+      if (convQuarterQuestion) convQuarterQuestion.textContent = kgi.quarter_stats?.question || 0;
+
+      const convQuarterBug = document.getElementById('conv-quarter-bug');
+      if (convQuarterBug) convQuarterBug.textContent = kgi.quarter_stats?.bug || 0;
+
+      const convQuarterRecurrence = document.getElementById('conv-quarter-recurrence');
+      if (convQuarterRecurrence) convQuarterRecurrence.textContent = kgi.quarter_stats?.recurrence || 0;
+
+      // Update week stats (7 days) - Conversation
+      const convWeekFeedback = document.getElementById('conv-week-feedback');
+      if (convWeekFeedback) convWeekFeedback.textContent = kgi.last_7_days?.feedback || 0;
+
+      const convWeekRequest = document.getElementById('conv-week-request');
+      if (convWeekRequest) convWeekRequest.textContent = kgi.last_7_days?.request || 0;
+
+      const convWeekQuestion = document.getElementById('conv-week-question');
+      if (convWeekQuestion) convWeekQuestion.textContent = kgi.last_7_days?.question || 0;
+
+      const convWeekBug = document.getElementById('conv-week-bug');
+      if (convWeekBug) convWeekBug.textContent = kgi.last_7_days?.bug || 0;
+
+      const convWeekRecurrence = document.getElementById('conv-week-recurrence');
+      if (convWeekRecurrence) convWeekRecurrence.textContent = kgi.last_7_days?.recurrence || 0;
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching KGI data:', error);
+    })
+    .getKGIStatus();
+}
+
+// Update Gemini Tab
+function updateGeminiTab(gemini, history) {
+  // Usage values
+  document.getElementById('geminiUsageValue').textContent = gemini.daily_count.toLocaleString();
+  document.getElementById('geminiUsageLimit').textContent = gemini.daily_limit.toLocaleString();
+  document.getElementById('geminiPercentLabel').textContent = gemini.percent + '%';
+
+  // Progress bar
+  const progressBar = document.getElementById('geminiProgressBar');
+  progressBar.style.width = Math.min(gemini.percent, 100) + '%';
+  progressBar.className = 'progress-bar ' + gemini.alert.level;
+
+  // Alert banner
+  const alertBanner = document.getElementById('alertBanner');
+  const alertMessage = document.getElementById('alertMessage');
+  if (gemini.alert.level !== 'normal') {
+    alertBanner.className = 'alert-banner ' + gemini.alert.level;
+    alertMessage.textContent = gemini.alert.message;
+  } else {
+    alertBanner.className = 'alert-banner';
+  }
+
+  // Reset timer
+  document.getElementById('geminiResetTime').textContent =
+    gemini.reset.hours + 'h ' + gemini.reset.minutes + 'm';
+
+  // Category breakdown
+  const categories = gemini.categories;
+  for (const cat of ['audit', 'search', 'review', 'design', 'other']) {
+    const catData = categories[cat] || { count: 0, percent: 0 };
+    document.getElementById('gemini' + capitalize(cat) + 'Count').textContent = catData.count;
+    document.getElementById('gemini' + capitalize(cat) + 'Percent').textContent = catData.percent + '%';
+    document.getElementById('gemini' + capitalize(cat) + 'Bar').style.width = catData.percent + '%';
+  }
+
+  // History chart
+  updateChart('geminiHistoryChart', history.records, 'total', false);
+}
+
+// Update Claude Tab
+function updateClaudeTab(claude, history) {
+  // Usage value
+  document.getElementById('claudeUsageValue').textContent = claude.total_sessions;
+
+  // Category breakdown
+  const categories = claude.categories;
+  for (const cat of ['development', 'fix', 'research', 'doc', 'config']) {
+    const catData = categories[cat] || { count: 0, percent: 0 };
+    document.getElementById('claude' + capitalize(cat) + 'Count').textContent = catData.count;
+    document.getElementById('claude' + capitalize(cat) + 'Percent').textContent = catData.percent + '%';
+    document.getElementById('claude' + capitalize(cat) + 'Bar').style.width = catData.percent + '%';
+  }
+
+  // History chart
+  updateChart('claudeHistoryChart', history.records, 'total', true);
+}
+
+// Update Defect Tab (Dark Theme + Kanban)
+function updateDefectTab(defect) {
+  // KGI: 0不良日連続達成
+  const streakEl = document.getElementById('defectStreak');
+  if (streakEl) streakEl.textContent = defect.zero_defect_days;
+
+  // KPI: 再発発生数
+  const recurrenceKPI = document.getElementById('defectRecurrenceKPI');
+  if (recurrenceKPI) recurrenceKPI.innerHTML = (defect.total_recurrences || 0) + '<span class="kgi-card-unit">件</span>';
+
+  // 直近3ヶ月カンバン
+  const quarterTotal = document.getElementById('defect-quarter-total');
+  if (quarterTotal) quarterTotal.textContent = defect.monthly_defects || 0;
+
+  const quarterRecurrence = document.getElementById('defect-quarter-recurrence');
+  if (quarterRecurrence) quarterRecurrence.textContent = defect.total_recurrences || 0;
+
+  const lastDate = document.getElementById('defect-last-date');
+  if (lastDate) lastDate.textContent = defect.last_defect_date || '--';
+
+  // 直近7日間カンバン（簡易計算）
+  const weekTotal = document.getElementById('defect-week-total');
+  if (weekTotal) weekTotal.textContent = 0; // TODO: 7日間データ取得が必要
+
+  const weekRecurrence = document.getElementById('defect-week-recurrence');
+  if (weekRecurrence) weekRecurrence.textContent = 0;
+
+  const weekRate = document.getElementById('defect-week-rate');
+  if (weekRate) weekRate.innerHTML = '0<span style="font-size: 0.8rem;">%</span>';
+
+  // 不具合一覧テーブル
+  const tbody = document.getElementById('defectTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (defect.recent_defects && defect.recent_defects.length > 0) {
+    defect.recent_defects.forEach(d => {
+      const tr = document.createElement('tr');
+
+      const tdDate = document.createElement('td');
+      tdDate.textContent = d.date;
+      tr.appendChild(tdDate);
+
+      const tdId = document.createElement('td');
+      tdId.textContent = d.trouble_id;
+      tr.appendChild(tdId);
+
+      const tdTitle = document.createElement('td');
+      tdTitle.textContent = d.title;
+      tr.appendChild(tdTitle);
+
+      const tdRecurrence = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'recurrence-badge ' + (d.is_recurrence ? 'yes' : 'no');
+      badge.textContent = d.is_recurrence ? '再発' : '新規';
+      tdRecurrence.appendChild(badge);
+      tr.appendChild(tdRecurrence);
+
+      tbody.appendChild(tr);
+    });
+  } else {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'log-empty';
+    td.textContent = '不具合の記録はありません';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+// Update Projects Tab
+function updateProjectsTab(projects) {
+  // Summary counts
+  document.getElementById('projectsProd').textContent = projects.summary.prod;
+  document.getElementById('projectsDev').textContent = projects.summary.dev;
+  document.getElementById('projectsProp').textContent = projects.summary.prop;
+
+  // Projects table
+  const tbody = document.getElementById('projectTableBody');
+  tbody.innerHTML = '';
+
+  const allProjects = [
+    ...projects.projects.prod.map(p => ({ ...p, envClass: 'prod' })),
+    ...projects.projects.dev.map(p => ({ ...p, envClass: 'dev' })),
+    ...projects.projects.prop.map(p => ({ ...p, envClass: 'prop' }))
+  ];
+
+  if (allProjects.length > 0) {
+    allProjects.forEach(p => {
+      const tr = document.createElement('tr');
+
+      const tdName = document.createElement('td');
+      tdName.textContent = p.name;
+      tr.appendChild(tdName);
+
+      const tdEnv = document.createElement('td');
+      const envBadge = document.createElement('span');
+      envBadge.className = 'env-badge-small ' + p.envClass;
+      envBadge.textContent = p.env;
+      tdEnv.appendChild(envBadge);
+      tr.appendChild(tdEnv);
+
+      const tdFolder = document.createElement('td');
+      tdFolder.textContent = p.folder;
+      tr.appendChild(tdFolder);
+
+      const tdScriptId = document.createElement('td');
+      tdScriptId.className = 'script-id';
+      tdScriptId.textContent = p.script_id ? p.script_id.substring(0, 15) + '...' : '-';
+      tdScriptId.title = p.script_id || '';
+      tr.appendChild(tdScriptId);
+
+      const tdStatus = document.createElement('td');
+      const statusBadge = document.createElement('span');
+      statusBadge.className = 'status-badge ' + (p.status === 'active' ? 'active' : 'inactive');
+      statusBadge.textContent = p.status || 'unknown';
+      tdStatus.appendChild(statusBadge);
+      tr.appendChild(tdStatus);
+
+      tbody.appendChild(tr);
+    });
+  } else {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = 'No projects registered';
+    td.style.textAlign = 'center';
+    td.style.color = '#5f6368';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+// Update chart
+function updateChart(containerId, records, valueKey, isClaude) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+
+  // Get last 7 days
+  const last7Days = [];
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    last7Days.push(date.toISOString().split('T')[0]);
+  }
+
+  // Calculate max for scaling
+  const maxCount = Math.max(
+    ...last7Days.map(date => {
+      const record = records.find(r => r.date === date);
+      return record ? (record[valueKey] || 0) : 0;
+    }),
+    10
+  );
+
+  last7Days.forEach(date => {
+    const record = records.find(r => r.date === date);
+    const count = record ? (record[valueKey] || 0) : 0;
+    const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chart-bar-wrapper';
+
+    const value = document.createElement('div');
+    value.className = 'chart-value';
+    value.textContent = count;
+    wrapper.appendChild(value);
+
+    const bar = document.createElement('div');
+    bar.className = 'chart-bar' + (isClaude ? ' claude' : '');
+    bar.style.height = Math.max(height, 2) + '%';
+    wrapper.appendChild(bar);
+
+    const label = document.createElement('div');
+    label.className = 'chart-label';
+    label.textContent = date.slice(5).replace('-', '/');
+    wrapper.appendChild(label);
+
+    container.appendChild(wrapper);
+  });
+}
+
+// Capitalize first letter
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// ========================================
+// 会話ログ（KGI計測）
+// ========================================
+
+// Fetch conversation logs and KGI data
+function fetchConversationData() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      updateConversationTab(data);
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching conversation data:', error);
+    })
+    .getConversationLogsData(50);
+
+  google.script.run
+    .withSuccessHandler(function(kgi) {
+      updateKGIDisplay(kgi);
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching KGI data:', error);
+    })
+    .getKGIStatus();
+}
+
+// Update KGI display
+function updateKGIDisplay(kgi) {
+  const scoreEl = document.getElementById('kgiScore');
+  if (scoreEl) scoreEl.textContent = kgi.kgi_score;
+
+  const feedbackEl = document.getElementById('kgiFeedback');
+  if (feedbackEl) feedbackEl.textContent = kgi.feedback_count;
+
+  const requestEl = document.getElementById('kgiRequest');
+  if (requestEl) requestEl.textContent = kgi.request_count;
+
+  const questionEl = document.getElementById('kgiQuestion');
+  if (questionEl) questionEl.textContent = kgi.question_count;
+
+  const bugEl = document.getElementById('kgiBug');
+  if (bugEl) bugEl.textContent = kgi.bug_count;
+
+  const recurrenceEl = document.getElementById('kgiRecurrence');
+  if (recurrenceEl) recurrenceEl.textContent = kgi.recurrence_count;
+
+  // Week stats
+  const weekFeedbackEl = document.getElementById('weekFeedback');
+  if (weekFeedbackEl) weekFeedbackEl.textContent = kgi.last_7_days.feedback;
+
+  const weekRequestEl = document.getElementById('weekRequest');
+  if (weekRequestEl) weekRequestEl.textContent = kgi.last_7_days.request;
+
+  const weekQuestionEl = document.getElementById('weekQuestion');
+  if (weekQuestionEl) weekQuestionEl.textContent = kgi.last_7_days.question;
+
+  // Update score card color based on score
+  const scoreCard = document.querySelector('.kgi-score-card');
+  if (scoreCard) {
+    if (kgi.kgi_score >= 80) {
+      scoreCard.style.background = 'linear-gradient(135deg, #238636 0%, #2ea043 100%)';
+    } else if (kgi.kgi_score >= 50) {
+      scoreCard.style.background = 'linear-gradient(135deg, #9e6a03 0%, #d29922 100%)';
+    } else {
+      scoreCard.style.background = 'linear-gradient(135deg, #da3633 0%, #f85149 100%)';
+    }
+  }
+}
+
+// Update conversation log list
+function updateConversationTab(data) {
+  const listEl = document.getElementById('conversationLogList');
+  if (!listEl) return;
+
+  listEl.innerHTML = '';
+
+  if (!data.logs || data.logs.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = 'データがありません';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  data.logs.forEach(log => {
+    const item = document.createElement('div');
+    item.className = 'log-item';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'log-header';
+
+    const id = document.createElement('span');
+    id.className = 'log-id';
+    id.textContent = log.conversation_id;
+    header.appendChild(id);
+
+    const project = document.createElement('span');
+    project.className = 'log-project';
+    project.textContent = log.project_name;
+    header.appendChild(project);
+
+    if (log.category) {
+      const category = document.createElement('span');
+      const catClass = log.category === '指摘' ? 'feedback' :
+                       log.category === '依頼' ? 'request' : 'question';
+      category.className = 'log-category ' + catClass;
+      category.textContent = log.category;
+      header.appendChild(category);
+    }
+
+    const timestamp = document.createElement('span');
+    timestamp.className = 'log-timestamp';
+    timestamp.textContent = formatTimestamp(log.timestamp);
+    header.appendChild(timestamp);
+
+    item.appendChild(header);
+
+    // Content
+    const content = document.createElement('div');
+    content.className = 'log-content';
+
+    // Human message
+    if (log.human_message) {
+      const humanMsg = document.createElement('div');
+      humanMsg.className = 'log-message';
+
+      const humanLabel = document.createElement('div');
+      humanLabel.className = 'log-message-label';
+      humanLabel.textContent = 'Human';
+      humanMsg.appendChild(humanLabel);
+
+      const humanText = document.createElement('div');
+      humanText.className = 'log-message-text';
+      humanText.textContent = truncateText(log.human_message, 200);
+      humanMsg.appendChild(humanText);
+
+      content.appendChild(humanMsg);
+    }
+
+    // Claude response
+    if (log.claude_response) {
+      const claudeMsg = document.createElement('div');
+      claudeMsg.className = 'log-message';
+
+      const claudeLabel = document.createElement('div');
+      claudeLabel.className = 'log-message-label';
+      claudeLabel.textContent = 'Claude';
+      claudeMsg.appendChild(claudeLabel);
+
+      const claudeText = document.createElement('div');
+      claudeText.className = 'log-message-text';
+      claudeText.textContent = truncateText(log.claude_response, 200);
+      claudeMsg.appendChild(claudeText);
+
+      content.appendChild(claudeMsg);
+    }
+
+    item.appendChild(content);
+
+    // Stats
+    const stats = document.createElement('div');
+    stats.className = 'log-stats';
+
+    const statItems = [
+      { label: '指摘', value: log.feedback_count },
+      { label: '依頼', value: log.request_count },
+      { label: '説明', value: log.question_count },
+      { label: 'バグ', value: log.bug_count },
+      { label: '再発', value: log.recurrence_count }
+    ];
+
+    statItems.forEach(s => {
+      const statItem = document.createElement('span');
+      statItem.className = 'log-stats-item';
+      statItem.innerHTML = s.label + ': <span>' + s.value + '</span>';
+      stats.appendChild(statItem);
+    });
+
+    item.appendChild(stats);
+    listEl.appendChild(item);
+  });
+}
+
+// Format timestamp
+function formatTimestamp(isoString) {
+  if (!isoString) return '--';
+  const date = new Date(isoString);
+  return date.toLocaleString('ja-JP', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+// Truncate text
+function truncateText(text, maxLength) {
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
+}
+
+// ========================================
+// Detail Slide Panel
+// ========================================
+
+// Open detail panel
+function openDetailPanel(title, content) {
+  document.getElementById('detailPanelTitle').textContent = title;
+  document.getElementById('detailPanelContent').innerHTML = content;
+  document.getElementById('detailPanel').classList.add('open');
+  document.getElementById('detailPanelOverlay').classList.add('open');
+}
+
+// Close detail panel
+function closeDetailPanel() {
+  document.getElementById('detailPanel').classList.remove('open');
+  document.getElementById('detailPanelOverlay').classList.remove('open');
+}
+
+// Show conversation detail
+function showConversationDetail(conv) {
+  const categoryClass = getCategoryClass(conv.category);
+  const content = `
+    <div class="detail-meta">
+      <div class="detail-meta-item">
+        <span class="detail-meta-label">日時:</span>
+        <span class="detail-meta-value">${conv.timestamp}</span>
+      </div>
+      <div class="detail-meta-item">
+        <span class="detail-meta-label">プロジェクト:</span>
+        <span class="detail-meta-value">${conv.project}</span>
+      </div>
+      <div class="detail-meta-item">
+        <span class="log-category ${categoryClass}">${conv.category}</span>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-title">内容</div>
+      <div class="detail-section-content">${escapeHtml(conv.fullContent || conv.content)}</div>
+    </div>
+  `;
+  openDetailPanel('会話ログ詳細', content);
+}
+
+// Show trouble detail with full report
+function showTroubleDetail(trouble) {
+  const recurrenceHtml = trouble.is_recurrence
+    ? '<span class="recurrence-badge yes">再発</span>'
+    : '';
+
+  const categoryBadge = trouble.category
+    ? `<span class="log-category" style="background: #21262d; color: #8b949e;">${escapeHtml(trouble.category)}</span>`
+    : '';
+
+  // 5W2H セクション構築
+  let statusSection = '';
+  if (trouble.where || trouble.who || trouble.what || trouble.how || trouble.impact || trouble.why) {
+    let statusItems = [];
+    if (trouble.where) statusItems.push(`<tr><td style="color: #8b949e; width: 80px;">どこで</td><td>${escapeHtml(trouble.where)}</td></tr>`);
+    if (trouble.who) statusItems.push(`<tr><td style="color: #8b949e;">誰が</td><td>${escapeHtml(trouble.who)}</td></tr>`);
+    if (trouble.what) statusItems.push(`<tr><td style="color: #8b949e;">何が</td><td>${escapeHtml(trouble.what)}</td></tr>`);
+    if (trouble.how) statusItems.push(`<tr><td style="color: #8b949e;">どうやって</td><td>${escapeHtml(trouble.how)}</td></tr>`);
+    if (trouble.impact) statusItems.push(`<tr><td style="color: #8b949e;">どれぐらい</td><td>${escapeHtml(trouble.impact)}</td></tr>`);
+    if (trouble.why) statusItems.push(`<tr><td style="color: #8b949e;">なぜ</td><td>${escapeHtml(trouble.why)}</td></tr>`);
+
+    if (statusItems.length > 0) {
+      statusSection = `
+        <div class="detail-section">
+          <div class="detail-section-title">現状把握（5W2H）</div>
+          <div class="detail-section-content" style="padding: 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              ${statusItems.join('')}
+            </table>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // なぜなぜ分析セクション
+  let whyWhySection = '';
+  if (trouble.whyWhy && trouble.whyWhy.length > 0) {
+    const whyWhyRows = trouble.whyWhy.map((item, i) =>
+      `<tr><td style="color: #8b949e; width: 30px;">${i + 1}</td><td style="color: #d29922;">${escapeHtml(item.q)}</td><td>${escapeHtml(item.a)}</td></tr>`
+    ).join('');
+    whyWhySection = `
+      <div class="detail-section">
+        <div class="detail-section-title">なぜなぜ分析</div>
+        <div class="detail-section-content" style="padding: 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            ${whyWhyRows}
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  const content = `
+    <div class="detail-meta">
+      <div class="detail-meta-item">
+        <span class="detail-meta-value" style="color: #58a6ff; font-family: monospace; font-weight: bold;">${trouble.id}</span>
+      </div>
+      <div class="detail-meta-item">
+        <span class="detail-meta-label">発生日:</span>
+        <span class="detail-meta-value">${trouble.date || '-'}</span>
+      </div>
+      ${recurrenceHtml ? `<div class="detail-meta-item">${recurrenceHtml}</div>` : ''}
+      ${categoryBadge ? `<div class="detail-meta-item">${categoryBadge}</div>` : ''}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">タイトル</div>
+      <div class="detail-section-content" style="font-size: 1.1rem; font-weight: 500;">${escapeHtml(trouble.title)}</div>
+    </div>
+
+    ${statusSection}
+
+    ${whyWhySection}
+
+    ${trouble.root_cause ? `
+    <div class="detail-section">
+      <div class="detail-section-title" style="color: #f85149;">真因</div>
+      <div class="detail-section-content" style="border-left: 3px solid #f85149;">${escapeHtml(trouble.root_cause)}</div>
+    </div>
+    ` : ''}
+
+    ${trouble.pokayoke ? `
+    <div class="detail-section">
+      <div class="detail-section-title" style="color: #2ea043;">ポカヨケ</div>
+      <div class="detail-section-content" style="border-left: 3px solid #2ea043;">${escapeHtml(trouble.pokayoke)}</div>
+    </div>
+    ` : ''}
+
+    ${trouble.learning ? `
+    <div class="detail-section">
+      <div class="detail-section-title" style="color: #58a6ff;">学び</div>
+      <div class="detail-section-content" style="border-left: 3px solid #58a6ff;">${escapeHtml(trouble.learning)}</div>
+    </div>
+    ` : ''}
+  `;
+  openDetailPanel('過去トラ詳細', content);
+}
+
+// ========================================
+// TPS Tab
+// ========================================
+
+/**
+ * TPS原則タブを更新
+ */
+function updateTPSTab(tpsData) {
+  if (!tpsData) return;
+
+  // KGI更新
+  if (tpsData.kgi) {
+    tpsData.kgi.forEach((kgi, index) => {
+      const elements = ['tpsKgiRuleViolation', 'tpsKgiRecurrence', 'tpsKgiSpecViolation'];
+      if (elements[index]) {
+        const el = document.getElementById(elements[index]);
+        if (el) {
+          el.textContent = kgi.current + kgi.unit;
+          // 目標達成時は緑、未達成時は赤
+          el.style.color = kgi.current <= 0 ? '#2ea043' : '#f85149';
+        }
+      }
+    });
+  }
+
+  // TPS 7原則を表示
+  if (tpsData.principles) {
+    const grid = document.getElementById('tpsPrinciplesGrid');
+    if (grid) {
+      grid.innerHTML = '';
+      tpsData.principles.forEach(principle => {
+        const card = document.createElement('div');
+        card.className = 'tps-principle-card' + (principle.status === 'planning' ? ' planning' : '');
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'tps-principle-name';
+        nameDiv.textContent = principle.name;
+
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'tps-principle-status ' + principle.status;
+        statusSpan.textContent = principle.status === 'active' ? '稼働中' : '計画中';
+        nameDiv.appendChild(statusSpan);
+
+        const nameEnDiv = document.createElement('div');
+        nameEnDiv.className = 'tps-principle-name-en';
+        nameEnDiv.textContent = principle.nameEn;
+
+        const descDiv = document.createElement('div');
+        descDiv.className = 'tps-principle-desc';
+        descDiv.textContent = principle.description;
+
+        const kpiDiv = document.createElement('div');
+        kpiDiv.className = 'tps-principle-kpi';
+        kpiDiv.textContent = 'KPI: ' + principle.kpi;
+
+        card.appendChild(nameDiv);
+        card.appendChild(nameEnDiv);
+        card.appendChild(descDiv);
+        card.appendChild(kpiDiv);
+        grid.appendChild(card);
+      });
+    }
+  }
+
+  // チェック項目テーブル更新
+  if (tpsData.checkItems) {
+    const tbody = document.getElementById('checkItemsTableBody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      tpsData.checkItems.forEach(item => {
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.textContent = item.name;
+
+        const tdForce = document.createElement('td');
+        const forceBadge = document.createElement('span');
+        forceBadge.style.cssText = 'padding: 2px 8px; border-radius: 4px; font-size: 0.8rem;';
+        const colors = ['#6c757d', '#ffc107', '#17a2b8', '#dc3545'];
+        const labels = ['Lv0', 'Lv1', 'Lv2', 'Lv3'];
+        forceBadge.style.background = colors[item.forceLevel] || '#6c757d';
+        forceBadge.style.color = item.forceLevel === 1 ? '#000' : '#fff';
+        forceBadge.textContent = labels[item.forceLevel] || 'Lv?';
+        tdForce.appendChild(forceBadge);
+
+        const tdTrigger = document.createElement('td');
+        tdTrigger.textContent = item.trigger;
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdForce);
+        tr.appendChild(tdTrigger);
+        tbody.appendChild(tr);
+      });
+    }
+  }
+}
+
+// Escape HTML for XSS prevention
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ========================================
+// お知らせ機能（Notifications）
+// ========================================
+
+// お知らせパネルの表示/非表示切り替え
+function toggleNotificationPanel() {
+  const panel = document.getElementById('notificationPanel');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    fetchNotifications();
+    // パネル外クリックで閉じる
+    document.addEventListener('click', closeNotificationPanelOnOutsideClick);
+  } else {
+    panel.style.display = 'none';
+    document.removeEventListener('click', closeNotificationPanelOnOutsideClick);
+  }
+}
+
+function closeNotificationPanelOnOutsideClick(e) {
+  const panel = document.getElementById('notificationPanel');
+  const bell = document.getElementById('notificationBell');
+  if (!panel.contains(e.target) && !bell.contains(e.target)) {
+    panel.style.display = 'none';
+    document.removeEventListener('click', closeNotificationPanelOnOutsideClick);
+  }
+}
+
+// お知らせを取得
+function fetchNotifications() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      cachedNotifications = data.notifications || [];
+      updateNotificationBadge(data.unreadCount || 0);
+      updateNotificationList(cachedNotifications.slice(0, 5));
+      updateNotificationFullList(cachedNotifications);
+      updateNotificationCategoryCounts(cachedNotifications);
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching notifications:', error);
+    })
+    .getNotifications(20, false);
+}
+
+// バッジを更新
+function updateNotificationBadge(count) {
+  const badge = document.getElementById('notificationBadge');
+  const navBadge = document.getElementById('navNotificationBadge');
+
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : count;
+    badge.style.display = 'block';
+    if (navBadge) {
+      navBadge.textContent = count > 99 ? '99+' : count;
+      navBadge.style.display = 'inline-block';
+    }
+  } else {
+    badge.style.display = 'none';
+    if (navBadge) {
+      navBadge.style.display = 'none';
+    }
+  }
+}
+
+// ドロップダウンリストを更新
+function updateNotificationList(notifications) {
+  const list = document.getElementById('notificationList');
+  list.innerHTML = '';
+
+  if (notifications.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'notification-empty';
+    empty.style.padding = '40px 20px';
+    empty.textContent = 'お知らせはありません';
+    list.appendChild(empty);
+    return;
+  }
+
+  notifications.forEach(notif => {
+    const item = document.createElement('div');
+    item.className = 'notification-item' + (notif.read ? '' : ' unread');
+    item.onclick = function() { markNotificationRead(notif.id); };
+
+    const tag = document.createElement('span');
+    tag.className = 'category-tag ' + notif.category;
+    tag.textContent = getCategoryLabel(notif.category);
+
+    const content = document.createElement('div');
+    content.className = 'notification-content';
+
+    const title = document.createElement('div');
+    title.className = 'notification-item-title';
+    title.textContent = notif.title;
+
+    const message = document.createElement('div');
+    message.className = 'notification-item-message';
+    message.textContent = notif.message;
+
+    const time = document.createElement('div');
+    time.className = 'notification-item-time';
+    time.textContent = formatRelativeTime(notif.timestamp);
+
+    content.appendChild(title);
+    content.appendChild(message);
+    content.appendChild(time);
+
+    item.appendChild(tag);
+    item.appendChild(content);
+    list.appendChild(item);
+  });
+}
+
+// フルリストを更新
+function updateNotificationFullList(notifications) {
+  const list = document.getElementById('notificationFullList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const filtered = currentNotificationFilter === 'unread'
+    ? notifications.filter(n => !n.read)
+    : notifications;
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'notification-empty';
+    empty.textContent = currentNotificationFilter === 'unread'
+      ? '未読のお知らせはありません'
+      : 'お知らせはありません';
+    list.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(notif => {
+    const item = document.createElement('div');
+    item.className = 'notification-full-item' + (notif.read ? '' : ' unread');
+    item.onclick = function() { markNotificationRead(notif.id); };
+
+    const content = document.createElement('div');
+    content.className = 'notification-full-content';
+
+    const header = document.createElement('div');
+    header.className = 'notification-full-header';
+
+    const tag = document.createElement('span');
+    tag.className = 'category-tag ' + notif.category;
+    tag.textContent = getCategoryLabel(notif.category);
+    header.appendChild(tag);
+
+    if (notif.priority === 'high') {
+      const priority = document.createElement('span');
+      priority.className = 'priority-badge high';
+      priority.textContent = '重要';
+      header.appendChild(priority);
+    }
+
+    const title = document.createElement('div');
+    title.className = 'notification-full-title';
+    title.textContent = notif.title;
+
+    const message = document.createElement('div');
+    message.className = 'notification-full-message';
+    message.textContent = notif.message;
+
+    const meta = document.createElement('div');
+    meta.className = 'notification-full-meta';
+    meta.textContent = formatRelativeTime(notif.timestamp);
+
+    if (notif.link) {
+      const link = document.createElement('a');
+      link.className = 'notification-link';
+      link.href = notif.link;
+      link.target = '_blank';
+      link.textContent = '詳細を見る';
+      meta.appendChild(link);
+    }
+
+    content.appendChild(header);
+    content.appendChild(title);
+    content.appendChild(message);
+    content.appendChild(meta);
+    item.appendChild(content);
+    list.appendChild(item);
+  });
+}
+
+// カテゴリ別件数を更新
+function updateNotificationCategoryCounts(notifications) {
+  const counts = { approval: 0, alert: 0, update: 0, info: 0, system: 0 };
+  notifications.forEach(n => {
+    if (counts[n.category] !== undefined) {
+      counts[n.category]++;
+    }
+  });
+
+  Object.keys(counts).forEach(cat => {
+    const el = document.getElementById('count-' + cat);
+    if (el) {
+      el.textContent = counts[cat];
+    }
+  });
+}
+
+// カテゴリラベルを取得
+function getCategoryLabel(category) {
+  const labels = {
+    approval: '承認',
+    alert: 'アラート',
+    update: '更新',
+    info: '情報',
+    system: 'システム'
+  };
+  return labels[category] || category;
+}
+
+// 相対時間フォーマット
+function formatRelativeTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = now - date;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return '今';
+  if (minutes < 60) return minutes + '分前';
+  if (hours < 24) return hours + '時間前';
+  if (days < 7) return days + '日前';
+  return date.toLocaleDateString('ja-JP');
+}
+
+// お知らせを既読にする
+function markNotificationRead(notificationId) {
+  google.script.run
+    .withSuccessHandler(function() {
+      fetchNotifications();
+    })
+    .markNotificationAsRead(notificationId);
+}
+
+// すべて既読にする
+function markAllAsRead() {
+  google.script.run
+    .withSuccessHandler(function(count) {
+      fetchNotifications();
+      // パネルを閉じる
+      const panel = document.getElementById('notificationPanel');
+      if (panel) panel.style.display = 'none';
+    })
+    .markAllNotificationsAsRead();
+}
+
+// フィルター切り替え
+function filterNotifications(filter) {
+  currentNotificationFilter = filter;
+
+  // ボタンのアクティブ状態を更新
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.dataset.filter === filter) {
+      btn.classList.add('active');
+    }
+  });
+
+  // リストを再描画
+  updateNotificationFullList(cachedNotifications);
+}
+
+// ===== 許可設定（FEATURE-008）=====
+
+// 許可設定を取得
+function fetchPermissionSettings() {
+  google.script.run
+    .withSuccessHandler(function(data) {
+      cachedPolicyData = data.permissions || [];
+      updatePolicyTable(cachedPolicyData);
+      updatePolicySummary(data.summary);
+    })
+    .withFailureHandler(function(error) {
+      console.error('Error fetching permission settings:', error);
+    })
+    .getPermissionSettings();
+}
+
+// ポリシーテーブルを更新
+function updatePolicyTable(permissions) {
+  const tbody = document.getElementById('policyTableBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+
+  // フィルター適用
+  let filtered = permissions;
+  if (currentPolicyFilter !== 'all') {
+    filtered = permissions.filter(p => p.status === currentPolicyFilter);
+  }
+
+  if (filtered.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.textContent = '該当する設定がありません';
+    td.style.textAlign = 'center';
+    td.style.color = '#5f6368';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  // カテゴリごとにグループ化表示
+  let currentCategory = '';
+  filtered.forEach(p => {
+    // カテゴリヘッダー行
+    if (p.categoryName !== currentCategory) {
+      currentCategory = p.categoryName;
+      const headerTr = document.createElement('tr');
+      headerTr.className = 'category-header';
+      const headerTd = document.createElement('td');
+      headerTd.colSpan = 4;
+      headerTd.textContent = currentCategory;
+      headerTd.style.backgroundColor = '#1a1a2e';
+      headerTd.style.fontWeight = 'bold';
+      headerTd.style.padding = '8px 12px';
+      headerTr.appendChild(headerTd);
+      tbody.appendChild(headerTr);
+    }
+
+    const tr = document.createElement('tr');
+
+    // 操作名
+    const tdOp = document.createElement('td');
+    const opCode = document.createElement('code');
+    opCode.textContent = p.operation;
+    opCode.style.fontSize = '0.85rem';
+    opCode.style.backgroundColor = '#2d2d44';
+    opCode.style.padding = '2px 6px';
+    opCode.style.borderRadius = '4px';
+    tdOp.appendChild(opCode);
+    tr.appendChild(tdOp);
+
+    // 用途
+    const tdPurpose = document.createElement('td');
+    tdPurpose.textContent = p.purpose;
+    tr.appendChild(tdPurpose);
+
+    // 許可状態
+    const tdStatus = document.createElement('td');
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'policy-badge ' + p.status;
+    const statusText = {
+      'allow': '許可',
+      'ask': '要承認',
+      'deny': '禁止'
+    };
+    statusBadge.textContent = statusText[p.status] || p.status;
+    tdStatus.appendChild(statusBadge);
+    tr.appendChild(tdStatus);
+
+    // 理由
+    const tdReason = document.createElement('td');
+    tdReason.textContent = p.reason;
+    tdReason.style.fontSize = '0.9rem';
+    tdReason.style.color = '#9ca3af';
+    tr.appendChild(tdReason);
+
+    tbody.appendChild(tr);
+  });
+}
+
+// ポリシーサマリーを更新
+function updatePolicySummary(summary) {
+  // サマリー表示領域がある場合に更新
+  const summaryEl = document.getElementById('policySummary');
+  if (summaryEl && summary) {
+    summaryEl.innerHTML = '';
+    const text = document.createElement('span');
+    text.textContent = '合計: ' + summary.total + ' | 許可: ' + summary.allow + ' | 要承認: ' + summary.ask + ' | 禁止: ' + summary.deny;
+    text.style.fontSize = '0.85rem';
+    text.style.color = '#9ca3af';
+    summaryEl.appendChild(text);
+  }
+}
+
+// ポリシーフィルター
+function filterPolicy(filter) {
+  currentPolicyFilter = filter;
+
+  // ボタンのアクティブ状態を更新
+  document.querySelectorAll('#tab-settings-policy .filter-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.dataset.filter === filter) {
+      btn.classList.add('active');
+    }
+  });
+
+  // テーブルを再描画
+  updatePolicyTable(cachedPolicyData);
+}
+
+// Initial load (SPA: データ取得は初回1回のみ)
+fetchAllData();
+
+// お知らせも初回取得
+fetchNotifications();
+
+// 許可設定も初回取得（FEATURE-008）
+fetchPermissionSettings();
+
+// 注: 自動リフレッシュは削除（Section 46 SPAアーキテクチャ原則）
+// 最新化はユーザーによるリロードまたは更新ボタンで実行
+</script>

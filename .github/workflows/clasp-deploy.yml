@@ -1,0 +1,128 @@
+# clasp-deploy.yml - GAS自動デプロイワークフロー
+# TPS自動化: clasp login不要でCI/CDからGASをデプロイ
+
+name: GAS Deploy
+
+on:
+  # 手動実行
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'デプロイ対象プロジェクト'
+        required: true
+        type: choice
+        options:
+          - gemini-dashboard-gas
+          - crm-dashboard
+      deploy_type:
+        description: 'デプロイタイプ'
+        required: true
+        type: choice
+        options:
+          - push_only
+          - push_and_deploy
+
+  # PRマージ時に自動実行（オプション）
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'gemini-dashboard-gas/**'
+  #     - 'crm-dashboard/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. リポジトリをチェックアウト
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Node.js セットアップ
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 3. clasp インストール
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      # 4. clasp認証設定
+      # CLASP_TOKEN: ~/.clasprc.json の内容をBase64エンコードしたもの
+      - name: Setup clasp authentication
+        env:
+          CLASP_TOKEN: ${{ secrets.CLASP_TOKEN }}
+        run: |
+          echo "Setting up clasp authentication..."
+          echo "$CLASP_TOKEN" | base64 -d > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+          echo "Authentication file created"
+
+      # 5. プロジェクトディレクトリに移動
+      - name: Navigate to project
+        run: |
+          cd ${{ github.event.inputs.project || 'gemini-dashboard-gas' }}
+          echo "Current directory: $(pwd)"
+          ls -la
+
+      # 6. clasp push
+      - name: Push to GAS
+        working-directory: ${{ github.event.inputs.project || 'gemini-dashboard-gas' }}
+        run: |
+          echo "Pushing to Google Apps Script..."
+          clasp push
+          echo "Push completed"
+
+      # 7. clasp deploy（オプション）
+      - name: Deploy to GAS
+        if: github.event.inputs.deploy_type == 'push_and_deploy'
+        working-directory: ${{ github.event.inputs.project || 'gemini-dashboard-gas' }}
+        run: |
+          echo "Deploying to Google Apps Script..."
+          # デプロイIDは各プロジェクトの.clasp.jsonから取得
+          # または環境変数で指定
+          clasp deploy --description "Deployed via GitHub Actions $(date +'%Y-%m-%d %H:%M:%S')"
+          echo "Deployment completed"
+
+      # 8. 結果通知（Discord）
+      - name: Notify Discord on success
+        if: success() && vars.DISCORD_WEBHOOK_URL
+        env:
+          DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"content\":\"✅ GAS Deploy成功\\n- Project: ${{ github.event.inputs.project }}\\n- Type: ${{ github.event.inputs.deploy_type }}\\n- Commit: ${{ github.sha }}\"}" \
+            "$DISCORD_WEBHOOK_URL"
+
+      - name: Notify Discord on failure
+        if: failure() && vars.DISCORD_WEBHOOK_URL
+        env:
+          DISCORD_WEBHOOK_URL: ${{ vars.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"content\":\"❌ GAS Deploy失敗\\n- Project: ${{ github.event.inputs.project }}\\n- Commit: ${{ github.sha }}\\n- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "$DISCORD_WEBHOOK_URL"
+
+# ========================================
+# セットアップ手順
+# ========================================
+#
+# 1. ローカルでclasp loginを実行
+#    $ clasp login
+#
+# 2. ~/.clasprc.json の内容をBase64エンコード
+#    $ cat ~/.clasprc.json | base64 > clasprc_base64.txt
+#
+# 3. GitHub Secretsに登録
+#    - リポジトリ Settings > Secrets and variables > Actions
+#    - New repository secret
+#    - Name: CLASP_TOKEN
+#    - Value: clasprc_base64.txt の内容をペースト
+#
+# 4. （オプション）Discord Webhook URL
+#    - Settings > Secrets and variables > Actions > Variables
+#    - Name: DISCORD_WEBHOOK_URL
+#    - Value: Discord Webhook URL
+#
+# ========================================

@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>採用診断システム</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <div class="container">
+
+    <!-- ===== 画面0: モバイルブロック画面 ===== -->
+    <div id="mobile-block" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>PCでアクセスしてください</h1>
+        </div>
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 60px; margin-bottom: 20px;">&#128187;</div>
+          <p style="color: #666; font-size: 16px; line-height: 1.8;">
+            この診断はPCでのみ受験可能です。<br>
+            お手数ですが、パソコンから<br>同じURLにアクセスしてください。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面1: ウェルカム画面 ===== -->
+    <div id="welcome" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>採用診断</h1>
+          <p>B2B営業適性を診断します</p>
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; margin-bottom: 30px;">
+          <h3 style="margin-bottom: 15px;">診断の流れ</h3>
+          <ol style="margin-left: 20px; color: #666; line-height: 2;">
+            <li>基本情報の入力（約2分）</li>
+            <li>適性診断テスト（全44問・約25分）</li>
+            <li>診断完了</li>
+          </ol>
+        </div>
+
+        <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid #ffc107;">
+          <strong>ご注意</strong>
+          <p style="font-size: 14px; color: #666; margin-top: 5px;">
+            各設問には制限時間があります。<br>
+            途中で中断した場合、最初からやり直しとなります。<br>
+            静かな環境で集中して取り組んでください。
+          </p>
+        </div>
+
+        <button class="btn btn-primary btn-block" onclick="startDiagnosis()">
+          診断を開始する
+        </button>
+
+        <div style="text-align: center; margin-top: 20px;">
+          <a href="#" onclick="goToAdmin(); return false;" style="color: #999; font-size: 12px;">管理者</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面2: 候補者登録 ===== -->
+    <div id="registration" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>基本情報の入力</h1>
+          <p>以下の情報を入力してください</p>
+        </div>
+
+        <div id="registration-form">
+          <!-- 氏名（姓・名） -->
+          <div class="form-row">
+            <div class="form-group half">
+              <label>姓 <span class="required">*</span></label>
+              <input type="text" id="reg-last-name" placeholder="山田" oninput="validateForm()">
+            </div>
+            <div class="form-group half">
+              <label>名 <span class="required">*</span></label>
+              <input type="text" id="reg-first-name" placeholder="太郎" oninput="validateForm()">
+            </div>
+          </div>
+
+          <!-- 氏名カナ（セイ・メイ） -->
+          <div class="form-row">
+            <div class="form-group half">
+              <label>セイ <span class="required">*</span></label>
+              <input type="text" id="reg-last-name-kana" placeholder="ヤマダ" oninput="validateForm()" onblur="validateKatakanaField(this)">
+              <span class="input-hint" id="hint-last-name-kana">全角カタカナで入力</span>
+            </div>
+            <div class="form-group half">
+              <label>メイ <span class="required">*</span></label>
+              <input type="text" id="reg-first-name-kana" placeholder="タロウ" oninput="validateForm()" onblur="validateKatakanaField(this)">
+              <span class="input-hint" id="hint-first-name-kana">全角カタカナで入力</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>メールアドレス <span class="required">*</span></label>
+            <input type="email" id="reg-email" placeholder="example@email.com" oninput="validateForm()">
+          </div>
+
+          <div class="form-group">
+            <label>電話番号 <span class="required">*</span></label>
+            <input type="tel" id="reg-phone" placeholder="09012345678" oninput="formatPhoneNumber(this)" maxlength="11">
+            <span class="input-hint">ハイフンなし、数字のみ</span>
+          </div>
+
+          <!-- プライバシーポリシー -->
+          <div style="background: #fafafa; padding: 15px; border-radius: 8px; margin-bottom: 20px; max-height: 150px; overflow-y: auto; border: 1px solid #e0e0e0;">
+            <h5 style="color: #333; margin-bottom: 10px; font-size: 13px;">個人情報の取り扱いについて</h5>
+            <p style="font-size: 12px; color: #666; line-height: 1.6;">
+              本診断で収集する個人情報（氏名、連絡先、診断回答）は、採用選考の目的でのみ利用いたします。
+              第三者への提供は法令に基づく場合を除き行いません。
+              保管期間は選考終了後1年間とし、その後は適切に廃棄いたします。
+              開示・訂正・削除のご要望は採用担当までご連絡ください。
+            </p>
+          </div>
+
+          <!-- 同意チェックボックス -->
+          <div class="form-group" style="margin-top: 20px;">
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="consent-checkbox" onchange="toggleStartButton()" style="margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0;">
+              <span style="font-size: 14px; color: #333;">
+                上記の内容を確認し、個人情報の取り扱いに同意の上、診断を開始します。
+                診断結果は採用選考の参考資料として利用されることに同意します。
+              </span>
+            </label>
+          </div>
+
+          <div class="nav" style="margin-top: 20px;">
+            <button class="btn btn-secondary" onclick="showScreen('welcome')">戻る</button>
+            <button class="btn btn-primary" id="start-diagnosis-btn" onclick="submitRegistration()" disabled style="opacity: 0.5;">
+              診断を開始する
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面3: セクション説明画面 ===== -->
+    <div id="section-intro" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1 id="section-intro-title">次のセクションについて</h1>
+          <p id="section-name"></p>
+        </div>
+
+        <div style="padding: 20px 10px;">
+          <!-- セクション説明文 -->
+          <p id="section-description" style="color: #666; font-size: 15px; line-height: 1.8; text-align: center; margin-bottom: 20px; white-space: pre-line;"></p>
+
+          <!-- 回答方法の図解（縮小版） -->
+          <div style="background: #f8f9fa; border-radius: 10px; padding: 10px; margin-bottom: 20px; max-width: 300px; margin-left: auto; margin-right: auto;">
+            <h4 style="color: #333; margin-bottom: 10px; text-align: center; font-size: 12px;">【回答方法】</h4>
+
+            <!-- 4択の図解（セクション1, 4用） -->
+            <div id="intro-choice-diagram" class="intro-diagram">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px;">
+                    <span style="width: 12px; height: 12px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666;">選択肢 A</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 2px solid #2563eb; border-radius: 4px; background: #eff6ff; font-size: 12px;">
+                    <span style="width: 12px; height: 12px; border: 2px solid #2563eb; border-radius: 50%; flex-shrink: 0; background: #2563eb;"></span>
+                    <span style="color: #1e3a5f; font-weight: 600;">選択肢 B（選択中）</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px;">
+                    <span style="width: 12px; height: 12px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666;">選択肢 C</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px;">
+                    <span style="width: 12px; height: 12px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666;">選択肢 D</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5段階評価の図解（セクション2用） -->
+            <div id="intro-scale-diagram" class="intro-diagram" style="display: none;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px;">
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                    <span style="width: 10px; height: 10px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666; font-size: 11px;">1 - 全く当てはまらない</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                    <span style="width: 10px; height: 10px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666; font-size: 11px;">2 - あまり当てはまらない</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                    <span style="width: 10px; height: 10px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666; font-size: 11px;">3 - どちらとも言えない</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 2px solid #2563eb; border-radius: 4px; background: #eff6ff;">
+                    <span style="width: 10px; height: 10px; border: 2px solid #2563eb; border-radius: 50%; flex-shrink: 0; background: #2563eb;"></span>
+                    <span style="color: #1e3a5f; font-size: 11px; font-weight: 600;">4 - やや当てはまる</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                    <span style="width: 10px; height: 10px; border: 2px solid #ccc; border-radius: 50%; flex-shrink: 0;"></span>
+                    <span style="color: #666; font-size: 11px;">5 - 非常に当てはまる</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 自由記述の図解（セクション3用） -->
+            <div id="intro-freeform-diagram" class="intro-diagram" style="display: none;">
+              <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px;">
+                <div style="border: 1px solid #ddd; border-radius: 4px; padding: 8px; background: #fafafa; min-height: 50px;">
+                  <span style="color: #999; font-size: 11px;">ここに自由に回答を入力...</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: #999;">
+                  <span>残り時間: 2:45</span>
+                  <span>0 / 500文字</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 練習問題の説明（練習がある場合のみ表示） -->
+          <div id="practice-info" style="background: #e0f2fe; padding: 12px; border-radius: 8px; margin-bottom: 20px; display: none;">
+            <p style="color: #0369a1; font-size: 13px; text-align: center;">
+              <strong>まず練習問題が<span id="practice-count">2</span>問あります。</strong><br>
+              操作に慣れてから本番に進みましょう。
+            </p>
+          </div>
+
+          <!-- 進捗プログレスバー -->
+          <div style="background: #e5e7eb; border-radius: 4px; height: 8px; margin-bottom: 20px; overflow: hidden;">
+            <div id="intro-progress-bar" style="background: linear-gradient(90deg, #1e3a5f, #2563eb); height: 100%; width: 100%; transition: width 0.05s linear;"></div>
+          </div>
+
+          <!-- 20秒カウントダウンタイマー -->
+          <div style="text-align: center; margin-bottom: 15px;">
+            <p style="color: #666; font-size: 13px; margin-bottom: 8px;">
+              <span id="intro-timer-text">20秒</span>後に自動で開始します
+            </p>
+            <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden; max-width: 200px; margin: 0 auto;">
+              <div id="intro-timer-bar" class="timer-progress-bar" style="height: 100%; width: 100%; transition: width 0.05s linear;"></div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-block" onclick="startSection()">
+          次へ進む
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== 画面4-1: 設問画面（4択） ===== -->
+    <div id="question-choice" class="screen">
+      <div class="card">
+        <!-- 練習問題バナー -->
+        <div id="practice-banner" class="practice-banner hidden">
+          <span>練習問題</span>
+        </div>
+
+        <!-- プログレス情報 -->
+        <div class="progress-info">
+          <span class="section-progress">セクション <span id="choice-current-section">1</span>/4</span>
+          <span class="question-progress">質問 <span id="choice-current-question">1</span>/<span id="choice-total-questions">16</span></span>
+        </div>
+
+        <!-- タイマープログレスバー -->
+        <div class="timer-progress-container">
+          <div class="timer-progress-bar" id="choice-timer-bar"></div>
+        </div>
+
+        <!-- 設問 -->
+        <div class="question-text" id="choice-question-text">
+          設問文がここに表示されます
+        </div>
+
+        <!-- 選択肢 -->
+        <div class="options-container" id="choice-options-container">
+          <!-- 選択肢がJSで生成される -->
+        </div>
+
+        <!-- 回答ボタン -->
+        <div class="answer-button-container">
+          <button class="btn btn-primary btn-block" id="choice-answer-btn" onclick="submitChoiceAnswer()" disabled>
+            回答する
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面4-2: 設問画面（5段階評価） ===== -->
+    <div id="question-scale" class="screen">
+      <div class="card">
+        <!-- 練習問題バナー -->
+        <div id="scale-practice-banner" class="practice-banner hidden">
+          <span>練習問題</span>
+        </div>
+
+        <!-- プログレス情報 -->
+        <div class="progress-info">
+          <span class="section-progress">セクション <span id="scale-current-section">2</span>/4</span>
+          <span class="question-progress">質問 <span id="scale-current-question">1</span>/<span id="scale-total-questions">20</span></span>
+        </div>
+
+        <!-- タイマープログレスバー -->
+        <div class="timer-progress-container">
+          <div class="timer-progress-bar" id="scale-timer-bar"></div>
+        </div>
+
+        <!-- 設問 -->
+        <div class="question-text" id="scale-question-text">
+          設問文がここに表示されます
+        </div>
+
+        <!-- 5段階評価スケール -->
+        <div class="scale-container" id="scale-options-container">
+          <div class="scale-labels">
+            <span>全く当てはまらない</span>
+            <span>非常に当てはまる</span>
+          </div>
+          <div class="scale-buttons">
+            <button class="scale-btn" data-value="1" onclick="selectScale(this, 1)">1</button>
+            <button class="scale-btn" data-value="2" onclick="selectScale(this, 2)">2</button>
+            <button class="scale-btn" data-value="3" onclick="selectScale(this, 3)">3</button>
+            <button class="scale-btn" data-value="4" onclick="selectScale(this, 4)">4</button>
+            <button class="scale-btn" data-value="5" onclick="selectScale(this, 5)">5</button>
+          </div>
+        </div>
+
+        <!-- 回答ボタン -->
+        <div class="answer-button-container">
+          <button class="btn btn-primary btn-block" id="scale-answer-btn" onclick="submitScaleAnswer()" disabled>
+            回答する
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面4-3: 設問画面（自由記述） ===== -->
+    <div id="question-freeform" class="screen">
+      <div class="card">
+        <!-- プログレス情報 -->
+        <div class="progress-info">
+          <span class="section-progress">セクション <span id="freeform-current-section">3</span>/4</span>
+          <span class="question-progress">質問 <span id="freeform-current-question">1</span>/<span id="freeform-total-questions">5</span></span>
+        </div>
+
+        <!-- タイマープログレスバー -->
+        <div class="timer-progress-container">
+          <div class="timer-progress-bar" id="freeform-timer-bar"></div>
+        </div>
+
+        <!-- 残り時間表示 -->
+        <div class="freeform-time-display">
+          残り時間: <span id="freeform-time-remaining">3:00</span>
+        </div>
+
+        <!-- 設問 -->
+        <div class="question-text" id="freeform-question-text">
+          設問文がここに表示されます
+        </div>
+
+        <!-- 自由記述エリア -->
+        <div class="freeform-container">
+          <textarea id="freeform-textarea" class="freeform-textarea" placeholder="こちらに回答を入力してください..." oninput="updateCharCount()"></textarea>
+          <div class="char-count">
+            <span id="char-count">0</span> 文字
+          </div>
+        </div>
+
+        <!-- 回答ボタン -->
+        <div class="answer-button-container">
+          <button class="btn btn-primary btn-block" id="freeform-answer-btn" onclick="submitFreeformAnswer()">
+            回答する
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面5: セクション休憩画面 ===== -->
+    <div id="section-break" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>セクション<span id="completed-section">1</span> 完了</h1>
+          <p>お疲れ様でした</p>
+        </div>
+
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 60px; margin-bottom: 20px;">&#9989;</div>
+          <p style="color: #666; font-size: 16px;">
+            少し休憩してください。
+          </p>
+          <p style="color: #2563eb; font-size: 20px; font-weight: bold; margin-top: 20px;">
+            <span id="break-countdown">5</span>秒後に次のセクションへ
+          </p>
+          <p style="color: #999; font-size: 14px; margin-top: 10px;">
+            残り: <strong id="remaining-sections">3</strong>セクション
+          </p>
+        </div>
+
+        <button class="btn btn-secondary btn-block" onclick="skipBreak()">
+          すぐに次へ進む
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== 画面6: 保存中 ===== -->
+    <div id="saving" class="screen">
+      <div class="card">
+        <div class="loading">
+          <div class="spinner"></div>
+          <div class="loading-text">診断結果を保存しています...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面7: 結果画面（シンプル版） ===== -->
+    <div id="result" class="screen">
+      <div class="card">
+        <div class="result-header-simple">
+          <div style="font-size: 60px; margin-bottom: 15px;">&#127881;</div>
+          <h1>診断完了</h1>
+          <p>ご協力ありがとうございました</p>
+        </div>
+
+        <div style="padding: 30px; text-align: center;">
+          <p style="color: #666; font-size: 16px; line-height: 1.8; margin-bottom: 30px;">
+            診断結果は採用担当者が確認いたします。<br>
+            後日、ご連絡させていただきますので<br>
+            しばらくお待ちください。
+          </p>
+
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+            <p style="font-size: 14px; color: #666;">受付番号: <strong id="diagnosis-id">-</strong></p>
+            <p style="font-size: 12px; color: #999; margin-top: 5px;">この番号を控えておいてください</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面8: 中断警告画面 ===== -->
+    <div id="interruption-warning" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1 style="color: #ef4444;">診断が中断されました</h1>
+        </div>
+
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 60px; margin-bottom: 20px;">&#9888;&#65039;</div>
+          <p style="color: #666; font-size: 16px; line-height: 1.8;">
+            ブラウザを閉じるか、別のタブに移動したため<br>
+            診断が中断されました。
+          </p>
+          <p style="color: #ef4444; font-size: 14px; margin-top: 20px;">
+            中断記録は保存されています。
+          </p>
+        </div>
+
+        <div style="padding: 0 20px 20px;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
+            再度診断を受ける場合は、採用担当者にお問い合わせください。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面9: 既に完了画面 ===== -->
+    <div id="already-completed" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>診断は完了しています</h1>
+        </div>
+
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 60px; margin-bottom: 20px;">&#9989;</div>
+          <p style="color: #666; font-size: 16px; line-height: 1.8;">
+            既にこのメールアドレスで診断を完了しています。<br>
+            結果については採用担当者からのご連絡をお待ちください。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 画面10: 中断済み（再アクセスブロック） ===== -->
+    <div id="already-interrupted" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1 style="color: #ef4444;">診断が中断されています</h1>
+        </div>
+
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 60px; margin-bottom: 20px;">&#128683;</div>
+          <p style="color: #666; font-size: 16px; line-height: 1.8;">
+            この診断は以前に中断されたため、<br>
+            再開することができません。
+          </p>
+          <p style="color: #999; font-size: 14px; margin-top: 20px;">
+            再度受験をご希望の場合は、<br>
+            採用担当者にお問い合わせください。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 管理者ログイン ===== -->
+    <div id="admin-login" class="screen">
+      <div class="card">
+        <div class="card-header">
+          <h1>管理者ログイン</h1>
+          <p>管理画面にアクセスするにはパスワードを入力してください</p>
+        </div>
+
+        <div class="form-group">
+          <label>パスワード</label>
+          <input type="password" id="admin-password" placeholder="パスワードを入力">
+        </div>
+
+        <div class="nav">
+          <button class="btn btn-secondary" onclick="showScreen('welcome')">戻る</button>
+          <button class="btn btn-primary" onclick="submitAdminLogin()">ログイン</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 管理ダッシュボード ===== -->
+    <div id="admin-dashboard" class="screen">
+      <div class="card">
+        <div class="admin-header">
+          <h2>管理ダッシュボード</h2>
+          <button class="btn btn-secondary" onclick="logoutAdmin()" style="padding: 8px 16px; font-size: 14px;">ログアウト</button>
+        </div>
+
+        <!-- 統計カード -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-total">0</div>
+            <div class="stat-label">総応募者数</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-completed">0</div>
+            <div class="stat-label">診断完了</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-waiting">0</div>
+            <div class="stat-label">診断待ち</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-interrupted">0</div>
+            <div class="stat-label">中断</div>
+          </div>
+        </div>
+
+        <!-- タブ -->
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab('candidates')">候補者一覧</button>
+          <button class="tab" onclick="switchTab('settings')">設定</button>
+        </div>
+
+        <!-- 候補者一覧タブ -->
+        <div id="tab-candidates" class="tab-content">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>氏名</th>
+                  <th>メール</th>
+                  <th>ステータス</th>
+                  <th>登録日</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="candidates-tbody">
+                <!-- JSで生成 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 設定タブ -->
+        <div id="tab-settings" class="tab-content hidden">
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <h4 style="margin-bottom: 15px;">診断設定</h4>
+            <div class="form-group">
+              <label>制限時間（秒）</label>
+              <input type="number" value="15" disabled style="background: #e9ecef;">
+            </div>
+            <p style="color: #666; font-size: 12px;">※設定変更はスプレッドシートから行ってください</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== 候補者詳細モーダル ===== -->
+  <div id="candidate-detail-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>候補者詳細</h3>
+        <button class="modal-close" onclick="closeModal('candidate-detail-modal')">&times;</button>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <p><strong>候補者ID:</strong> <span id="detail-candidate-id">-</span></p>
+        <p><strong>氏名:</strong> <span id="detail-name">-</span></p>
+        <p><strong>メール:</strong> <span id="detail-email">-</span></p>
+        <p><strong>電話:</strong> <span id="detail-phone">-</span></p>
+        <p><strong>ステータス:</strong> <span id="detail-status">-</span></p>
+      </div>
+
+      <h4 style="margin-bottom: 10px;">診断結果</h4>
+      <div id="detail-diagnosis">
+        <!-- JSで生成 -->
+      </div>
+
+      <div class="mt-20">
+        <button class="btn btn-secondary btn-block" onclick="closeModal('candidate-detail-modal')">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

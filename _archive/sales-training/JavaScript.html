@@ -1,0 +1,431 @@
+<script>
+/**
+ * 営業教育アプリ - JavaScript
+ */
+
+// ===== グローバル変数 =====
+let currentEmployeeId = 'EMP-001'; // 仮のログインユーザー
+let dashboardData = {};
+let quizzes = [];
+let tips = [];
+let skillCategories = {};
+let currentView = 'dashboard';
+let currentQuizIndex = 0;
+let currentCategory = '';
+
+// ===== 初期化 =====
+document.addEventListener('DOMContentLoaded', function() {
+  loadInitialData();
+});
+
+function loadInitialData() {
+  showLoading();
+
+  Promise.all([
+    new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(data => { dashboardData = data || {}; resolve(); })
+        .withFailureHandler(err => { console.error('getTrainingDashboardStats error:', err); dashboardData = {}; resolve(); })
+        .getTrainingDashboardStats(currentEmployeeId);
+    }),
+    new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(data => { quizzes = data || []; resolve(); })
+        .withFailureHandler(err => { console.error('getQuizzes error:', err); quizzes = []; resolve(); })
+        .getQuizzes();
+    }),
+    new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(data => { tips = data || []; resolve(); })
+        .withFailureHandler(err => { console.error('getAllTips error:', err); tips = []; resolve(); })
+        .getAllTips();
+    }),
+    new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(data => { skillCategories = data || {}; resolve(); })
+        .withFailureHandler(err => { console.error('getSkillCategories error:', err); skillCategories = {}; resolve(); })
+        .getSkillCategories();
+    })
+  ]).then(() => {
+    hideLoading();
+    // スプレッドシート未設定の場合
+    if (Object.keys(dashboardData).length === 0 && quizzes.length === 0 && tips.length === 0) {
+      showSetupWarning();
+    } else {
+      renderCurrentView();
+    }
+  }).catch(err => {
+    hideLoading();
+    console.error('loadInitialData error:', err);
+    showSetupWarning();
+  });
+}
+
+function showSetupWarning() {
+  const container = document.querySelector('.main-content') || document.querySelector('.container');
+  if (container) {
+    container.innerHTML = `
+      <div style="padding: 40px; text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 20px;">&#9888;</div>
+        <h2 style="color: #ef4444; margin-bottom: 15px;">セットアップが必要です</h2>
+        <p style="color: #666; margin-bottom: 20px;">
+          スプレッドシートが設定されていません。<br>
+          GASエディタで <code>setupTrainingSystem()</code> を実行してください。
+        </p>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: left; max-width: 400px; margin: 0 auto;">
+          <p style="font-size: 14px; margin-bottom: 10px;"><strong>手順:</strong></p>
+          <ol style="font-size: 13px; color: #666; margin-left: 20px;">
+            <li>GASエディタを開く</li>
+            <li>setupTrainingSystem() を実行</li>
+            <li>ページをリロード</li>
+          </ol>
+        </div>
+      </div>
+    `;
+  }
+}
+
+// ===== ビュー切り替え =====
+function switchView(view) {
+  currentView = view;
+
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.dataset.view === view) {
+      btn.classList.add('active');
+    }
+  });
+
+  document.querySelectorAll('.view').forEach(v => {
+    v.classList.remove('active');
+  });
+  document.getElementById(`view-${view}`)?.classList.add('active');
+
+  renderCurrentView();
+}
+
+function renderCurrentView() {
+  switch (currentView) {
+    case 'dashboard':
+      renderDashboard();
+      break;
+    case 'quiz':
+      renderQuizCategories();
+      break;
+    case 'reflection':
+      renderReflections();
+      break;
+    case 'tips':
+      renderTips();
+      break;
+  }
+}
+
+// ===== ダッシュボード =====
+function renderDashboard() {
+  const employee = dashboardData.employee;
+  const quizStats = dashboardData.quizStats || {};
+  const skills = dashboardData.skills || {};
+
+  // プロフィール
+  if (employee) {
+    document.getElementById('profile-name').textContent = employee.name || '未設定';
+    document.getElementById('profile-team').textContent = `${employee.team || '-'} / ${employee.position || '-'}`;
+    document.getElementById('disc-type').textContent = `DISC: ${employee.discType || '-'}`;
+    document.getElementById('disc-type').className = `disc-badge type-${employee.discType || 'S'}`;
+  }
+
+  // 統計
+  document.getElementById('stat-quizzes').textContent = quizStats.totalQuizzes || 0;
+  document.getElementById('stat-accuracy').textContent = `${quizStats.accuracy || 0}%`;
+  document.getElementById('stat-score').textContent = quizStats.totalScore || 0;
+  document.getElementById('stat-achievement').textContent = `${dashboardData.achievement || 0}%`;
+
+  // 達成度メーター
+  const achievementPercent = dashboardData.achievement || 0;
+  document.querySelector('.achievement-circle').style.setProperty('--progress', `${achievementPercent * 3.6}deg`);
+  document.querySelector('.achievement-inner').textContent = `${achievementPercent}%`;
+
+  // スキルバー
+  renderSkillBars(skills);
+
+  // 直近の振り返り
+  renderRecentReflection();
+
+  // 今日のTip
+  renderRandomTip();
+}
+
+function renderSkillBars(skills) {
+  const container = document.getElementById('skill-bars');
+  if (!container) return;
+
+  container.innerHTML = Object.entries(skillCategories).map(([name, info]) => {
+    const level = skills[name] || 50;
+    return `
+      <div class="skill-bar-item">
+        <div class="skill-bar-label">
+          <span>${info.icon}</span>
+          <span>${name}</span>
+        </div>
+        <div class="skill-bar">
+          <div class="skill-bar-fill" style="width: ${level}%; background: ${info.color};">${level}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderRecentReflection() {
+  const container = document.getElementById('recent-reflection');
+  if (!container) return;
+
+  const reflections = dashboardData.reflections || [];
+  if (reflections.length === 0) {
+    container.innerHTML = '<p style="color: #666; text-align: center;">まだ振り返りがありません</p>';
+    return;
+  }
+
+  const latest = reflections[0];
+  container.innerHTML = `
+    <div class="reflection-card">
+      <div class="reflection-header">
+        <span class="reflection-week">${latest.week}</span>
+        <span class="reflection-date">${formatDate(latest.createdAt)}</span>
+      </div>
+      <div class="reflection-content">
+        <strong>気づき:</strong> ${latest.recentInsights || '-'}
+      </div>
+      <div class="motivation-indicator">
+        ${[1,2,3,4,5].map(i => `<span class="motivation-star ${i <= (latest.motivation || 3) ? 'active' : ''}">★</span>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderRandomTip() {
+  const container = document.getElementById('random-tip');
+  if (!container || tips.length === 0) return;
+
+  const tip = tips[Math.floor(Math.random() * tips.length)];
+  const catInfo = skillCategories[tip.category] || { icon: '💡', color: '#059669' };
+
+  container.innerHTML = `
+    <div class="tip-header">
+      <span class="tip-icon">${catInfo.icon}</span>
+      <span class="tip-category">${tip.category}</span>
+    </div>
+    <div class="tip-title">${tip.title}</div>
+    <div class="tip-content">${tip.content}</div>
+  `;
+}
+
+// ===== クイズ =====
+function renderQuizCategories() {
+  const container = document.getElementById('quiz-categories');
+  if (!container) return;
+
+  container.innerHTML = Object.entries(skillCategories).map(([name, info]) => {
+    const categoryQuizzes = quizzes.filter(q => q.category === name);
+    return `
+      <div class="quiz-category-card" onclick="startQuiz('${name}')">
+        <div class="category-icon">${info.icon}</div>
+        <div class="category-name">${name}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 5px;">${categoryQuizzes.length}問</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function startQuiz(category) {
+  currentCategory = category;
+  currentQuizIndex = 0;
+
+  const categoryQuizzes = quizzes.filter(q => q.category === category);
+  if (categoryQuizzes.length === 0) {
+    alert('このカテゴリの問題はまだありません');
+    return;
+  }
+
+  document.getElementById('quiz-categories').style.display = 'none';
+  document.getElementById('quiz-container').style.display = 'block';
+
+  showQuizQuestion();
+}
+
+function showQuizQuestion() {
+  const categoryQuizzes = quizzes.filter(q => q.category === currentCategory);
+  if (currentQuizIndex >= categoryQuizzes.length) {
+    finishQuiz();
+    return;
+  }
+
+  const quiz = categoryQuizzes[currentQuizIndex];
+  const container = document.getElementById('quiz-question-container');
+
+  document.getElementById('quiz-progress').textContent = `${currentQuizIndex + 1} / ${categoryQuizzes.length}`;
+
+  container.innerHTML = `
+    <div class="quiz-question">${quiz.question}</div>
+    <div class="quiz-options">
+      ${quiz.options.map((opt, i) => `
+        <div class="quiz-option" data-index="${i + 1}" onclick="selectAnswer(this, '${quiz.quizId}', ${i + 1})">${opt}</div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function selectAnswer(element, quizId, answer) {
+  // すでに回答済みなら何もしない
+  if (element.classList.contains('selected') || element.classList.contains('correct') || element.classList.contains('incorrect')) {
+    return;
+  }
+
+  element.classList.add('selected');
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      // 正解/不正解を表示
+      document.querySelectorAll('.quiz-option').forEach((opt, i) => {
+        const idx = parseInt(opt.dataset.index);
+        if (idx === result.correctAnswer) {
+          opt.classList.add('correct');
+        } else if (idx === answer && !result.isCorrect) {
+          opt.classList.add('incorrect');
+        }
+      });
+
+      // 次の問題へ
+      setTimeout(() => {
+        currentQuizIndex++;
+        showQuizQuestion();
+      }, 1500);
+    })
+    .submitQuizAnswer(currentEmployeeId, quizId, answer);
+}
+
+function finishQuiz() {
+  document.getElementById('quiz-container').style.display = 'none';
+  document.getElementById('quiz-categories').style.display = 'grid';
+
+  alert('クイズ完了！お疲れ様でした。');
+
+  // データを再読み込み
+  loadInitialData();
+}
+
+function backToCategories() {
+  document.getElementById('quiz-container').style.display = 'none';
+  document.getElementById('quiz-categories').style.display = 'grid';
+}
+
+// ===== 振り返り =====
+function renderReflections() {
+  const container = document.getElementById('reflection-list');
+  if (!container) return;
+
+  const reflections = dashboardData.reflections || [];
+
+  if (reflections.length === 0) {
+    container.innerHTML = '<p style="text-align: center; color: #666;">まだ振り返りがありません</p>';
+    return;
+  }
+
+  container.innerHTML = reflections.map(r => `
+    <div class="reflection-card">
+      <div class="reflection-header">
+        <span class="reflection-week">${r.week}</span>
+        <span class="reflection-date">${formatDate(r.createdAt)}</span>
+      </div>
+      <div class="reflection-content">
+        <p><strong>直近の気づき:</strong> ${r.recentInsights || '-'}</p>
+        <p style="margin-top: 8px;"><strong>継続している課題:</strong> ${r.ongoingChallenges || '-'}</p>
+        <p style="margin-top: 8px;"><strong>来週のアクション:</strong> ${r.nextActions || '-'}</p>
+      </div>
+      <div class="motivation-indicator">
+        ${[1,2,3,4,5].map(i => `<span class="motivation-star ${i <= (r.motivation || 3) ? 'active' : ''}">★</span>`).join('')}
+      </div>
+      ${r.managerComment ? `<div style="margin-top: 10px; padding: 10px; background: #f0fdf4; border-radius: 8px; font-size: 13px;"><strong>上長コメント:</strong> ${r.managerComment}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function openReflectionModal() {
+  document.getElementById('reflection-form').reset();
+  showModal('reflection-modal');
+}
+
+function submitReflection() {
+  const data = {
+    employeeId: currentEmployeeId,
+    recentInsights: document.getElementById('ref-insights').value,
+    ongoingChallenges: document.getElementById('ref-challenges').value,
+    motivation: parseInt(document.getElementById('ref-motivation').value),
+    nextActions: document.getElementById('ref-actions').value
+  };
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        closeModal('reflection-modal');
+        alert('振り返りを保存しました！');
+        loadInitialData();
+      } else {
+        alert('エラー: ' + result.error);
+      }
+    })
+    .addReflection(data);
+}
+
+// ===== Tips =====
+function renderTips() {
+  const container = document.getElementById('tips-list');
+  if (!container) return;
+
+  container.innerHTML = tips.map(tip => {
+    const catInfo = skillCategories[tip.category] || { icon: '💡', color: '#059669' };
+    return `
+      <div class="tip-card" style="background: linear-gradient(135deg, ${hexToRgba(catInfo.color, 0.1)} 0%, ${hexToRgba(catInfo.color, 0.2)} 100%);">
+        <div class="tip-header">
+          <span class="tip-icon">${catInfo.icon}</span>
+          <span class="tip-category" style="color: ${catInfo.color};">${tip.category}</span>
+        </div>
+        <div class="tip-title" style="color: ${catInfo.color};">${tip.title}</div>
+        <div class="tip-content">${tip.content}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ===== ユーティリティ =====
+function formatDate(dateString) {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// ===== モーダル =====
+function showModal(modalId) {
+  document.getElementById(modalId).classList.add('active');
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.remove('active');
+}
+
+// ===== ローディング =====
+function showLoading() {
+  document.getElementById('loading-overlay')?.classList.add('active');
+}
+
+function hideLoading() {
+  document.getElementById('loading-overlay')?.classList.remove('active');
+}
+</script>

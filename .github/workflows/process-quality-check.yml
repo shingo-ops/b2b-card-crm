@@ -1,0 +1,173 @@
+# 工程別品質管理チェック
+# Gemini監査承認: 読了証明の技術的検証版
+
+name: Process Quality Check
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # 読了証明ハッシュ検証（技術的検証版）
+  reading-proof-check:
+    name: Reading Proof Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check reading proof in commit message
+        id: check-reading
+        run: |
+          echo "=== 読了証明チェック ==="
+          echo ""
+
+          # 最新コミットメッセージを取得
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "コミットメッセージ:"
+          echo "$COMMIT_MSG"
+          echo ""
+
+          # 読了証明のパターンをチェック
+          # パターン: "読了: XX行" または "MD5:" または "読了証明"
+          if echo "$COMMIT_MSG" | grep -qE "(読了|MD5|読了証明|全文読了)"; then
+            echo "✅ 読了証明が含まれています"
+            echo "reading_proof=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ 読了証明が含まれていません（警告のみ）"
+            echo "reading_proof=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check PROCESS_QUALITY files exist
+        id: check-files
+        run: |
+          echo "=== 工程品質管理ファイルチェック ==="
+          echo ""
+
+          MISSING=0
+          NEW_PROCESS_ERROR=0
+
+          # INDEX.mdの存在確認
+          if [ -f "docs/00_common/PROCESS_QUALITY/INDEX.md" ]; then
+            echo "✅ INDEX.md exists"
+          else
+            echo "❌ INDEX.md missing"
+            MISSING=$((MISSING + 1))
+          fi
+
+          # 全ての工程フォルダをチェック（新規追加も含む）
+          for DIR in docs/00_common/PROCESS_QUALITY/*/; do
+            if [ -d "$DIR" ]; then
+              proc=$(basename "$DIR")
+
+              # XX_NAME形式かチェック
+              if [[ ! "$proc" =~ ^[0-9]{2}_ ]]; then
+                continue  # 形式が違う場合はスキップ
+              fi
+
+              echo "Checking: $proc"
+
+              # 3ファイル必須チェック（ポカヨケ）
+              for file in POKAYOKE.md TROUBLE_LOG.md POKA_HISTORY.md; do
+                if [ ! -f "$DIR$file" ]; then
+                  echo "::error file=$DIR$file::$proc/$file が存在しません。新規工程追加時は scripts/add-new-process.sh を使用してください。"
+                  MISSING=$((MISSING + 1))
+                  NEW_PROCESS_ERROR=1
+                fi
+              done
+            fi
+          done
+
+          if [ $NEW_PROCESS_ERROR -gt 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "新規工程追加ポカヨケ"
+            echo "=========================================="
+            echo ""
+            echo "新規工程を追加する場合は、以下のスクリプトを使用してください："
+            echo ""
+            echo "  ./scripts/add-new-process.sh [番号] [名前] \"[説明]\""
+            echo ""
+            echo "例: ./scripts/add-new-process.sh 11 DATABASE \"データベース作成/編集\""
+            echo ""
+          fi
+
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "::error::$MISSING file(s) missing in PROCESS_QUALITY"
+            exit 1
+          else
+            echo ""
+            echo "✅ All PROCESS_QUALITY files exist"
+          fi
+
+      - name: Validate POKA_HISTORY format
+        id: check-format
+        run: |
+          echo "=== POKA_HISTORY.mdフォーマットチェック ==="
+          echo ""
+
+          ERRORS=0
+
+          for file in docs/00_common/PROCESS_QUALITY/*/POKA_HISTORY.md; do
+            if [ -f "$file" ]; then
+              # ヘッダー行の存在確認
+              if ! grep -q "ポカID" "$file"; then
+                echo "⚠️ $file: ヘッダー行が見つかりません"
+              fi
+
+              # POKA-XX-XXX形式のチェック（存在する場合）
+              if grep -q "POKA-" "$file"; then
+                # 不正な形式をチェック
+                if grep "POKA-" "$file" | grep -vE "POKA-[0-9]{2}-[0-9]{3}|テンプレート" > /dev/null 2>&1; then
+                  echo "⚠️ $file: 不正なPOKA-ID形式があります"
+                fi
+              fi
+            fi
+          done
+
+          echo ""
+          echo "✅ フォーマットチェック完了"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "工程別品質管理チェック完了"
+          echo "=========================================="
+          echo ""
+          echo "チェック項目:"
+          echo "1. 読了証明の存在（警告のみ）"
+          echo "2. PROCESS_QUALITYファイル構造"
+          echo "3. POKA_HISTORY.mdフォーマット"
+          echo ""
+          echo "参照: docs/00_common/PROCESS_QUALITY/INDEX.md"
+
+  # ローカル↔GitHub同期チェック（参考情報）
+  sync-info:
+    name: Sync Check Info
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show sync check command
+        run: |
+          echo "=========================================="
+          echo "ローカル↔GitHub同期チェック"
+          echo "=========================================="
+          echo ""
+          echo "ローカルで以下のコマンドを実行して同期状態を確認してください："
+          echo ""
+          echo "  ./scripts/check-sync.sh"
+          echo ""
+          echo "KGI: ローカルとGitHubのファイルずれ 0件"
+          echo ""
+          echo "参照: CLAUDE.md セクション13"

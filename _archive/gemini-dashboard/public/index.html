@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Usage Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1>
+        Gemini Usage Dashboard
+        <span class="env-badge">提案環境</span>
+      </h1>
+      <button class="refresh-btn" onclick="fetchData()">
+        <span>Refresh</span>
+      </button>
+    </header>
+
+    <!-- Alert Banner -->
+    <div id="alertBanner" class="alert-banner">
+      <span id="alertMessage"></span>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p style="margin-top: 15px;">Loading...</p>
+    </div>
+
+    <!-- Main Content -->
+    <div id="mainContent" style="display: none;">
+      <!-- Cards Grid -->
+      <div class="cards-grid">
+        <!-- Main Usage Card -->
+        <div class="card usage-main">
+          <div class="card-header">
+            <span class="card-title">Daily Usage</span>
+            <span class="card-icon">📊</span>
+          </div>
+          <div class="usage-value" id="usageValue">0</div>
+          <div class="usage-limit">/ <span id="usageLimit">1000</span> requests</div>
+          <div class="progress-container">
+            <div class="progress-bar normal" id="progressBar" style="width: 0%"></div>
+          </div>
+          <div class="progress-labels">
+            <span>0%</span>
+            <span id="percentLabel">0%</span>
+            <span>100%</span>
+          </div>
+        </div>
+
+        <!-- Rate Limit Card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Rate Limit (per min)</span>
+            <span class="card-icon">⏱️</span>
+          </div>
+          <div class="stat-value"><span id="rateValue">0</span> / 60</div>
+          <div class="stat-label">requests in last 60 seconds</div>
+          <div class="rate-limit-bar" id="rateLimitBar"></div>
+        </div>
+
+        <!-- Reset Timer Card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Reset In</span>
+            <span class="card-icon">🔄</span>
+          </div>
+          <div class="stat-value" id="resetTime">--:--</div>
+          <div class="stat-label">until UTC midnight</div>
+        </div>
+
+        <!-- History Chart -->
+        <div class="card history-card">
+          <div class="card-header">
+            <span class="card-title">Usage History (Last 7 Days)</span>
+            <span class="card-icon">📈</span>
+          </div>
+          <div class="chart-container" id="historyChart"></div>
+          <div class="chart-labels" id="chartLabels"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="updated">Last updated: <span id="lastUpdated">--</span></div>
+      <div>Gemini Usage Dashboard v1.0.1 | Designed by Claude Code + Gemini Pro</div>
+    </footer>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

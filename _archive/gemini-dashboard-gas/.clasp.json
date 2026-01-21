@@ -1,0 +1,18 @@
+{
+  "scriptId": "1UxE0XsPCn22ja32KBUA2253-7SQfCIPwPMckdJeMY9gNEP4UOM2_3Scf",
+  "rootDir": "",
+  "projectId": "sales-ops-with-claude",
+  "parentId": "1qA0EsBBcY4JRTA32MSXEuMFOxtNLRiTq_Oy_1j0wmEo",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

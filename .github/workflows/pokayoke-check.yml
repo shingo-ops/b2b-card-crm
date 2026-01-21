@@ -1,0 +1,517 @@
+name: Pokayoke Check
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]  # Gemini指摘: devを追加
+
+jobs:
+  pokayoke-validation:
+    runs-on: ubuntu-latest
+    name: Validate Pokayoke Standards
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 緊急対応ラベル連携（TROUBLE-042対策 + TROUBLE-050対策）
+      # emergencyラベル付きPRはHuman Approve必須。Approve後に監査スキップ＋事後監査Issue作成
+      - name: Check for emergency label
+        id: emergency-check
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Emergency Label Check ==="
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          # PRのラベルを取得
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels -q '.labels[].name' 2>/dev/null || echo "")
+          echo "PR Labels: $LABELS"
+
+          if echo "$LABELS" | grep -q "emergency"; then
+            echo "⚠️ Emergency label detected"
+            echo ""
+
+            # Human Approveの確認（偽装防止）
+            # PRのレビュー状態を取得
+            APPROVALS=$(gh pr view "$PR_NUMBER" --json reviews -q '[.reviews[] | select(.state == "APPROVED")] | length' 2>/dev/null || echo "0")
+            echo "Approval count: $APPROVALS"
+
+            if [ "$APPROVALS" -eq "0" ]; then
+              echo ""
+              echo "❌ FAILED: Emergency label requires Human Approve"
+              echo ""
+              echo "Emergency PRの悪用防止のため、Human Approveが必須です。"
+              echo ""
+              echo "手順:"
+              echo "1. PRにレビューをリクエスト"
+              echo "2. HumanがPRをレビューしてApprove"
+              echo "3. 再度CIを実行"
+              echo ""
+              echo "（参照: TROUBLE-050対策 - emergencyラベル悪用防止）"
+              exit 1
+            fi
+
+            echo "✅ Human Approve confirmed - skipping audit check"
+            echo "Creating post-audit issue..."
+
+            # 事後監査Issue作成
+            gh issue create \
+              --title "[事後監査] PR #$PR_NUMBER - Emergency対応" \
+              --body "## 事後監査対象
+
+          - PR: #$PR_NUMBER
+          - ラベル: emergency
+          - Human Approve: 確認済み
+          - 作成日: $(date +%Y-%m-%d)
+
+          ## チェックリスト
+
+          - [ ] Gemini監査を実施
+          - [ ] 監査結果を本Issueにコメント
+          - [ ] 指摘事項への対応完了
+
+          ## 期限
+
+          PR マージ後 **3営業日以内** に監査を完了すること。
+
+          ---
+          *このIssueはCI自動生成です（TROUBLE-042, TROUBLE-050対策）*" \
+              --label "post-audit" || echo "Issue creation failed (may already exist)"
+
+            echo "EMERGENCY_SKIP=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No emergency label - proceeding with normal checks"
+            echo "EMERGENCY_SKIP=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check commit message format
+        id: commit-check
+        if: steps.emergency-check.outputs.EMERGENCY_SKIP != 'true'
+        run: |
+          echo "=== Commit Message Validation ==="
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Latest commit message:"
+          echo "$COMMIT_MSG"
+          echo ""
+
+          # Skip check for auto-generated commits (conversation logs)
+          if echo "$COMMIT_MSG" | grep -q "(auto)"; then
+            echo "✅ Auto-generated commit - skipping audit check"
+            exit 0
+          fi
+
+          # Check if commit needs audit (code changes)
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          CODE_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.(gs|js|ts|html|css)$' || true)
+
+          if [ -z "$CODE_CHANGES" ]; then
+            echo "✅ No code changes - audit not required"
+            exit 0
+          fi
+
+          echo "Code files changed:"
+          echo "$CODE_CHANGES"
+          echo ""
+
+          # Gemini指摘: Warningではなくexit 1で失敗させる
+          # 「監査済み」の定義: Geminiによる監査結果をコミットに添付し、指摘事項への対応が完了した状態
+          if ! echo "$COMMIT_MSG" | grep -q "監査済み"; then
+            echo "❌ FAILED: Code changes detected but commit not marked as audited"
+            echo ""
+            echo "Required format: 監査済み(コミットハッシュ)"
+            echo ""
+            echo "Definition of '監査済み':"
+            echo "- Gemini監査を実施済み"
+            echo "- 監査結果をPRまたはコミットに添付"
+            echo "- 指摘事項への対応が完了"
+            exit 1
+          fi
+
+          echo "✅ Commit marked as audited"
+
+      - name: Check CLAUDE.md 5W2H compliance
+        id: 5w2h-check
+        run: |
+          echo "=== 5W2H Compliance Check ==="
+
+          if [ ! -f "CLAUDE.md" ]; then
+            echo "❌ CLAUDE.md not found"
+            exit 1
+          fi
+
+          FAILED=0
+
+          # Check Section 31-37 for 5W2H tables with quality criteria
+          # 改修理由: Section 37の必須セクション7項目をカバーするため（カバー率28.6%→100%）
+          for section in 31 32 33 34 35 36 37; do
+            echo "Checking Section $section..."
+            if grep -q "## $section\." CLAUDE.md; then
+              # Extract section content
+              SECTION_CONTENT=$(sed -n "/## $section\./,/## [0-9]/p" CLAUDE.md | head -200)
+
+              # Check for 5W2H keyword
+              if echo "$SECTION_CONTENT" | grep -q "5W2H"; then
+                # Gemini指摘: 品質基準を追加（5W2Hテーブルの各行に最低限の内容があるか）
+                # 各要素（When, Where, Who, What, How）が存在するかチェック
+                ELEMENTS_FOUND=0
+                for elem in "When" "Where" "Who" "What" "How"; do
+                  if echo "$SECTION_CONTENT" | grep -q "| $elem |"; then
+                    ELEMENTS_FOUND=$((ELEMENTS_FOUND + 1))
+                  fi
+                done
+
+                if [ $ELEMENTS_FOUND -ge 4 ]; then
+                  echo "✅ Section $section: 5W2H elements found ($ELEMENTS_FOUND/5)"
+                else
+                  echo "⚠️ Section $section: Only $ELEMENTS_FOUND/5 5W2H elements found"
+                fi
+              else
+                echo "❌ Section $section: Missing 5W2H"
+                FAILED=1
+              fi
+            fi
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "5W2H check FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ 5W2H check passed"
+
+      # Section 37必須セクション7項目チェック（カバー率100%達成のため追加）
+      - name: Check Section 37 required elements
+        id: section37-check
+        run: |
+          echo "=== Section 37 Required Elements Check ==="
+
+          if [ ! -f "CLAUDE.md" ]; then
+            echo "⚠️ CLAUDE.md not found - skipping"
+            exit 0
+          fi
+
+          # Section 37の内容を抽出
+          SECTION37=$(sed -n '/## 37\./,/## 38\./p' CLAUDE.md 2>/dev/null || echo "")
+
+          if [ -z "$SECTION37" ]; then
+            echo "⚠️ Section 37 not found - skipping"
+            exit 0
+          fi
+
+          FAILED=0
+
+          # 必須セクション7項目のチェック（Section 37の表に基づく）
+          echo "Checking required template sections..."
+
+          # 1. 監査対象
+          if echo "$SECTION37" | grep -q "監査対象"; then
+            echo "✅ 1/7: 監査対象 - Found"
+          else
+            echo "❌ 1/7: 監査対象 - Missing"
+            FAILED=1
+          fi
+
+          # 2. 変更内容
+          if echo "$SECTION37" | grep -q "変更内容"; then
+            echo "✅ 2/7: 変更内容 - Found"
+          else
+            echo "❌ 2/7: 変更内容 - Missing"
+            FAILED=1
+          fi
+
+          # 3. 対象ファイル全文
+          if echo "$SECTION37" | grep -q "対象ファイル全文"; then
+            echo "✅ 3/7: 対象ファイル全文 - Found"
+          else
+            echo "❌ 3/7: 対象ファイル全文 - Missing"
+            FAILED=1
+          fi
+
+          # 4. 突破テスト観点
+          if echo "$SECTION37" | grep -q "突破テスト観点"; then
+            echo "✅ 4/7: 突破テスト観点 - Found"
+          else
+            echo "❌ 4/7: 突破テスト観点 - Missing"
+            FAILED=1
+          fi
+
+          # 5. 判定基準
+          if echo "$SECTION37" | grep -q "判定基準"; then
+            echo "✅ 5/7: 判定基準 - Found"
+          else
+            echo "❌ 5/7: 判定基準 - Missing"
+            FAILED=1
+          fi
+
+          # 6. 期待する出力形式
+          if echo "$SECTION37" | grep -q "期待する出力形式"; then
+            echo "✅ 6/7: 期待する出力形式 - Found"
+          else
+            echo "❌ 6/7: 期待する出力形式 - Missing"
+            FAILED=1
+          fi
+
+          # 7. 総合判定
+          if echo "$SECTION37" | grep -q "総合判定"; then
+            echo "✅ 7/7: 総合判定 - Found"
+          else
+            echo "❌ 7/7: 総合判定 - Missing"
+            FAILED=1
+          fi
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "❌ Section 37 required elements check FAILED"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Section 37 required elements check passed (7/7)"
+
+      - name: Check for ambiguous expressions
+        id: ambiguous-check
+        run: |
+          echo "=== Ambiguous Expression Check ==="
+
+          # Ambiguous patterns to detect in CLAUDE.md (expanded list per Gemini feedback)
+          AMBIGUOUS_PATTERNS=(
+            "適宜"
+            "必要に応じて"
+            "適切に"
+            "できるだけ"
+            "なるべく"
+            "いい感じに"
+            "うまく"
+            "良い感じに"
+          )
+
+          FOUND_AMBIGUOUS=0
+          AMBIGUOUS_LINES=""
+
+          for pattern in "${AMBIGUOUS_PATTERNS[@]}"; do
+            MATCHES=$(grep -n "$pattern" CLAUDE.md 2>/dev/null || true)
+            if [ -n "$MATCHES" ]; then
+              echo "❌ Found ambiguous expression '$pattern':"
+              echo "$MATCHES"
+              FOUND_AMBIGUOUS=1
+              AMBIGUOUS_LINES="$AMBIGUOUS_LINES\n$MATCHES"
+            fi
+          done
+
+          if [ $FOUND_AMBIGUOUS -eq 1 ]; then
+            echo ""
+            echo "❌ Ambiguous expressions detected - must be replaced with specific criteria"
+            # Gemini指摘: Warningではなく失敗させる
+            exit 1
+          fi
+
+          echo "✅ No ambiguous expressions found in CLAUDE.md"
+
+      # Section 30準拠チェック（P4計画実装: ポカヨケ設置時の技術的強制力必須化）
+      - name: Check Section 30 compliance
+        id: section30-check
+        run: |
+          echo "=== Section 30 Compliance Check (P4) ==="
+
+          if [ ! -f "CLAUDE.md" ]; then
+            echo "⚠️ CLAUDE.md not found - skipping"
+            exit 0
+          fi
+
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha || 'HEAD~1' }} HEAD 2>/dev/null || echo "")
+
+          # Check if CLAUDE.md is changed
+          if ! echo "$CHANGED_FILES" | grep -q "CLAUDE.md"; then
+            echo "✅ CLAUDE.md not changed - skipping Section 30 check"
+            exit 0
+          fi
+
+          # Detect new Section additions
+          NEW_SECTIONS=$(git diff ${{ github.event.pull_request.base.sha || 'HEAD~1' }} CLAUDE.md 2>/dev/null | grep "^+## [0-9]" || true)
+
+          if [ -z "$NEW_SECTIONS" ]; then
+            echo "✅ No new Section added - skipping Section 30 check"
+            exit 0
+          fi
+
+          echo "New Section(s) detected:"
+          echo "$NEW_SECTIONS"
+          echo ""
+
+          ERRORS=0
+
+          # Get the added content
+          ADDED_CONTENT=$(git diff ${{ github.event.pull_request.base.sha || 'HEAD~1' }} CLAUDE.md 2>/dev/null | grep "^+" | tail -200)
+
+          # Check 1: 強制プロセスセクション
+          if echo "$ADDED_CONTENT" | grep -q "強制プロセス"; then
+            echo "✅ 1/3: 強制プロセスセクション - Found"
+          else
+            echo "❌ 1/3: 強制プロセスセクション - Missing (憲法第3条違反)"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check 2: TROUBLE参照
+          if echo "$ADDED_CONTENT" | grep -qE "TROUBLE-[0-9]+"; then
+            echo "✅ 2/3: 過去トラ参照 (TROUBLE-XXX) - Found"
+          else
+            echo "❌ 2/3: 過去トラ参照 (TROUBLE-XXX) - Missing"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check 3: MAPPING更新
+          if echo "$CHANGED_FILES" | grep -q "TROUBLE_POKAYOKE_MAPPING.md"; then
+            echo "✅ 3/3: TROUBLE_POKAYOKE_MAPPING.md - Updated"
+          else
+            echo "❌ 3/3: TROUBLE_POKAYOKE_MAPPING.md - Not updated"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Recommended checks (warnings only)
+          echo ""
+          echo "Recommended checks (warnings):"
+
+          # 5W2H check
+          if echo "$ADDED_CONTENT" | grep -qE "(When|Where|Who|What|Why|How|いつ|どこ|誰|何|なぜ|どのように)"; then
+            echo "✅ 5W2H elements - Found"
+          else
+            echo "⚠️ 5W2H elements - Missing (Section 34 recommends)"
+          fi
+
+          # Numeric criteria check
+          if echo "$ADDED_CONTENT" | grep -qE "[0-9]+(%|件|回|分|秒|時間|日)"; then
+            echo "✅ Numeric criteria - Found"
+          else
+            echo "⚠️ Numeric criteria - Missing (Section 34 recommends)"
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "❌ FAILED: Section 30 compliance check failed ($ERRORS errors)"
+            echo ""
+            echo "新規Section追加時は以下が必須です:"
+            echo "  1. 強制プロセスセクションを含めること"
+            echo "  2. 過去トラ参照（TROUBLE-XXX）を含めること"
+            echo "  3. TROUBLE_POKAYOKE_MAPPING.mdを更新すること"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Section 30 compliance check passed"
+
+      - name: Check TROUBLE_POKAYOKE_MAPPING sync
+        id: mapping-check
+        run: |
+          echo "=== TROUBLE-Pokayoke Mapping Sync Check ==="
+
+          TROUBLE_LOG="docs/01_crm/TROUBLE_LOG.md"
+          MAPPING_FILE="docs/00_common/TROUBLE_POKAYOKE_MAPPING.md"
+
+          if [ ! -f "$TROUBLE_LOG" ]; then
+            echo "⚠️ TROUBLE_LOG.md not found at expected path - skipping"
+            exit 0
+          fi
+
+          if [ ! -f "$MAPPING_FILE" ]; then
+            echo "⚠️ TROUBLE_POKAYOKE_MAPPING.md not found at expected path - skipping"
+            exit 0
+          fi
+
+          # Count TROUBLEs in each file
+          TROUBLE_COUNT=$(grep -c "^## TROUBLE-[0-9]" "$TROUBLE_LOG" 2>/dev/null || echo "0")
+          MAPPING_COUNT=$(grep -c "| TROUBLE-[0-9]" "$MAPPING_FILE" 2>/dev/null || echo "0")
+
+          echo "TROUBLE_LOG entries: $TROUBLE_COUNT"
+          echo "MAPPING entries: $MAPPING_COUNT"
+
+          if [ "$TROUBLE_COUNT" != "$MAPPING_COUNT" ]; then
+            echo "❌ FAILED: Count mismatch - some TROUBLEs may not have pokayoke mappings"
+            echo "TROUBLE_LOG: $TROUBLE_COUNT entries"
+            echo "MAPPING: $MAPPING_COUNT entries"
+            # Gemini指摘: 失敗させる
+            exit 1
+          fi
+
+          echo "✅ TROUBLE count matches mapping count"
+
+      - name: Check PR description for audit results (形骸化防止)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== PR Description Audit Results Check ==="
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          echo "Checking PR #$PR_NUMBER"
+
+          # Get PR body
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q .body 2>/dev/null || echo "")
+
+          if [ -z "$PR_BODY" ]; then
+            echo "⚠️ PR description is empty - skipping check"
+            exit 0
+          fi
+
+          # Check for required sections (形骸化防止)
+          MISSING_SECTIONS=0
+
+          # Check for Gemini audit results section
+          if ! echo "$PR_BODY" | grep -q "## Gemini監査結果"; then
+            echo "❌ Missing section: '## Gemini監査結果'"
+            MISSING_SECTIONS=1
+          else
+            echo "✅ Found: '## Gemini監査結果'"
+          fi
+
+          # Check for audit judgment
+          if ! echo "$PR_BODY" | grep -qE "(承認|要改修|却下)"; then
+            echo "❌ Missing audit judgment (承認/要改修/却下)"
+            MISSING_SECTIONS=1
+          else
+            echo "✅ Found: audit judgment"
+          fi
+
+          if [ $MISSING_SECTIONS -eq 1 ]; then
+            echo ""
+            echo "❌ FAILED: PR description missing required audit sections"
+            echo ""
+            echo "Required format in PR description:"
+            echo "## Gemini監査結果"
+            echo "- 判定: 承認/要改修/却下"
+            echo "- [Gemini応答全文]"
+            exit 1
+          fi
+
+          echo "✅ PR description contains required audit sections"
+
+      - name: Generate validation summary
+        if: always()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "       POKAYOKE VALIDATION SUMMARY"
+          echo "========================================"
+          echo ""
+          echo "Validation criteria (8 items - 100% coverage):"
+          echo "1. Emergency label: emergencyラベル付きPRはHuman Approve必須（偽装不可）"
+          echo "2. Commit message: Must contain '監査済み' for code changes"
+          echo "3. 5W2H compliance: Sections 31-37 must have 5W2H tables"
+          echo "4. Section 37 elements: 7 required template sections must exist"
+          echo "5. Ambiguous expressions: Prohibited patterns must not exist"
+          echo "6. Section 30 compliance: New Sections must have 強制プロセス, TROUBLE ref, MAPPING update"
+          echo "7. TROUBLE-Pokayoke sync: Entry counts must match"
+          echo "8. PR description: Must contain '## Gemini監査結果' section"
+          echo ""
+          echo "P4 Implementation: Section 30 compliance check added"
+          echo "Reference: TROUBLE-042, Section 30, Section 37"
+          echo ""
+          echo "For failed checks, fix the issues and re-push."
+          echo "========================================"

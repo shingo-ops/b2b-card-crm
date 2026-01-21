@@ -1,0 +1,292 @@
+# コード品質チェック
+# KGI: コード品質違反 0件（エラーレベル）
+# GASコードの構文エラー、未使用変数、危険なパターンを検出
+
+name: Code Quality Check
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.gs'
+      - '**/*.js'
+      - '**/*.html'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.gs'
+      - '**/*.js'
+      - '**/*.html'
+
+jobs:
+  gas-code-quality:
+    name: GAS Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check GAS syntax patterns
+        id: syntax-check
+        run: |
+          echo "==========================================="
+          echo "GASコード品質チェック"
+          echo "KGI: コード品質違反 0件"
+          echo "==========================================="
+          echo ""
+
+          ERRORS=0
+          WARNINGS=0
+
+          # GASファイル検索
+          GAS_FILES=$(find . -name "*.gs" ! -path "./.git/*" ! -path "./node_modules/*" 2>/dev/null || true)
+
+          if [ -z "$GAS_FILES" ]; then
+            echo "ℹ️ GASファイルが見つかりません"
+            exit 0
+          fi
+
+          echo "--- 構文パターンチェック ---"
+          echo ""
+
+          for file in $GAS_FILES; do
+            echo "📄 $file"
+
+            # 1. console.log検出（GASでは Logger.log を使用すべき）
+            if grep -n "console\.log" "$file" 2>/dev/null; then
+              echo "   ⚠️ console.log検出: Logger.logを使用してください"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            # 2. var宣言検出（const/letを推奨）
+            var_count=$(grep -c "^\s*var\s" "$file" 2>/dev/null || echo "0")
+            if [ "$var_count" -gt 0 ]; then
+              echo "   ⚠️ var宣言 $var_count 件: const/letを推奨"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            # 3. 無限ループ危険パターン
+            if grep -nE "while\s*\(\s*true\s*\)|for\s*\(\s*;\s*;\s*\)" "$file" 2>/dev/null; then
+              echo "   ❌ 無限ループパターン検出"
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            # 4. eval使用検出（セキュリティリスク）
+            if grep -n "eval\s*(" "$file" 2>/dev/null; then
+              echo "   ❌ eval()使用検出: セキュリティリスク"
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            # 5. 未定義変数の可能性（簡易チェック）
+            # function内でreturnがない場合
+            if grep -qE "function\s+\w+\s*\([^)]*\)\s*\{" "$file"; then
+              func_without_return=$(awk '/function\s+\w+\s*\([^)]*\)\s*\{/{found=1; start=NR} found && /\}/ && !/return/{if(found && NR>start){print start":"$0}; found=0}' "$file" 2>/dev/null | head -3 || true)
+              # このチェックは複雑なので警告のみ
+            fi
+
+            # 6. 危険な削除操作
+            if grep -nE "\.deleteSheet\(|\.deleteRow\(|\.deleteColumn\(" "$file" 2>/dev/null; then
+              echo "   ⚠️ 削除操作検出: 確認推奨"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            # 7. ハードコードされた行/列番号（マジックナンバー）
+            magic_numbers=$(grep -onE "getRange\([0-9]+," "$file" 2>/dev/null | wc -l || echo "0")
+            if [ "$magic_numbers" -gt 5 ]; then
+              echo "   ⚠️ マジックナンバー多数: 定数化を推奨"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            echo ""
+          done
+
+          echo "==========================================="
+          echo "チェック結果"
+          echo "==========================================="
+          echo ""
+          echo "| 項目 | 件数 |"
+          echo "|------|------|"
+          echo "| エラー | $ERRORS |"
+          echo "| 警告 | $WARNINGS |"
+          echo ""
+
+          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ エラーがあります。修正が必要です。"
+            exit 1
+          else
+            echo "✅ エラーなし（警告は任意対応）"
+          fi
+
+      - name: Check LockService usage
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "LockService使用チェック"
+          echo "==========================================="
+          echo ""
+
+          # insertSheet/deleteSheet を使用しているファイルでLockServiceがないものを検出
+          GAS_FILES=$(find . -name "*.gs" ! -path "./.git/*" ! -path "./node_modules/*" 2>/dev/null || true)
+
+          VIOLATIONS=0
+
+          for file in $GAS_FILES; do
+            # シート操作を含むファイルをチェック
+            if grep -qE "insertSheet|deleteSheet|insertRows|deleteRows" "$file" 2>/dev/null; then
+              if ! grep -q "LockService" "$file" 2>/dev/null; then
+                echo "❌ $file: シート操作があるがLockServiceがありません"
+                VIOLATIONS=$((VIOLATIONS + 1))
+              else
+                echo "✅ $file: LockService使用確認"
+              fi
+            fi
+          done
+
+          echo ""
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo "❌ $VIOLATIONS 件のLockService未使用を検出"
+            echo ""
+            echo "参照: docs/00_common/PROCESS_QUALITY/03_GAS_EDITOR/POKAYOKE.md"
+            exit 1
+          else
+            echo "✅ LockService: 問題なし"
+          fi
+
+      - name: Check API function exports
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "API関数エクスポートチェック"
+          echo "==========================================="
+          echo ""
+
+          # WebApp.gs と HTML内の google.script.run 呼び出しの整合性チェック
+          if [ -f "crm-dashboard/WebApp.gs" ]; then
+            echo "📄 CRM Dashboard API整合性チェック"
+
+            # WebApp.gsから関数名を抽出
+            API_FUNCS=$(grep -oE "^function\s+\w+" crm-dashboard/WebApp.gs 2>/dev/null | sed 's/function //' | sort | uniq)
+
+            # HTMLファイルから呼び出されている関数を抽出
+            HTML_CALLS=$(grep -rohE "google\.script\.run\.[a-zA-Z_]+\(" crm-dashboard/*.html 2>/dev/null | sed 's/google\.script\.run\.//' | sed 's/($//' | sort | uniq)
+
+            MISSING=0
+            for call in $HTML_CALLS; do
+              if ! echo "$API_FUNCS" | grep -qw "$call"; then
+                echo "❌ $call: HTMLで呼び出されているがWebApp.gsに存在しません"
+                MISSING=$((MISSING + 1))
+              fi
+            done
+
+            if [ $MISSING -gt 0 ]; then
+              echo ""
+              echo "❌ $MISSING 件のAPI不整合を検出"
+              exit 1
+            else
+              echo "✅ API整合性: 問題なし"
+            fi
+          else
+            echo "ℹ️ WebApp.gsが見つかりません（スキップ）"
+          fi
+
+  # HTMLコード品質
+  html-quality:
+    name: HTML Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check HTML patterns
+        run: |
+          echo "==========================================="
+          echo "HTML品質チェック"
+          echo "==========================================="
+          echo ""
+
+          ERRORS=0
+          WARNINGS=0
+
+          HTML_FILES=$(find . -name "*.html" ! -path "./.git/*" ! -path "./node_modules/*" 2>/dev/null || true)
+
+          for file in $HTML_FILES; do
+            echo "📄 $file"
+
+            # 1. インラインスタイル過多
+            inline_styles=$(grep -c "style=\"" "$file" 2>/dev/null || echo "0")
+            if [ "$inline_styles" -gt 20 ]; then
+              echo "   ⚠️ インラインスタイル $inline_styles 件: CSSクラス化を推奨"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            # 2. innerHTML使用（XSSリスク）
+            if grep -n "\.innerHTML\s*=" "$file" 2>/dev/null | head -3; then
+              echo "   ⚠️ innerHTML使用: textContentまたはサニタイズを推奨"
+              WARNINGS=$((WARNINGS + 1))
+            fi
+
+            # 3. document.write使用
+            if grep -n "document\.write" "$file" 2>/dev/null; then
+              echo "   ❌ document.write使用: 非推奨"
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            echo ""
+          done
+
+          echo "==========================================="
+          echo "| 項目 | 件数 |"
+          echo "|------|------|"
+          echo "| エラー | $ERRORS |"
+          echo "| 警告 | $WARNINGS |"
+          echo ""
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+
+  # システム自体のポカヨケ
+  code-quality-self-check:
+    name: Code Quality Self Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate code quality check configuration
+        run: |
+          echo "==========================================="
+          echo "コード品質チェック自己検証"
+          echo "==========================================="
+          echo ""
+
+          if [ -f ".github/workflows/code-quality-check.yml" ]; then
+            echo "✅ code-quality-check.yml: 存在"
+
+            # 必須のジョブ確認
+            for job in "gas-code-quality" "html-quality"; do
+              if grep -q "$job" .github/workflows/code-quality-check.yml; then
+                echo "✅ $job job: 存在"
+              else
+                echo "❌ $job job: 欠落"
+                exit 1
+              fi
+            done
+          else
+            echo "❌ code-quality-check.yml: 存在しません"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ コード品質チェック設定: 正常"

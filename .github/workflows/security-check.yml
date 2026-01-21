@@ -1,0 +1,202 @@
+# セキュリティチェック
+# KGI: 機密情報漏洩 0件
+# APIキー、パスワード、認証情報の検出
+
+name: Security Check
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  secret-detection:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for secrets in code
+        id: secret-check
+        run: |
+          echo "==========================================="
+          echo "機密情報検出チェック"
+          echo "KGI: 機密情報漏洩 0件"
+          echo "==========================================="
+          echo ""
+
+          SECRETS_FOUND=0
+
+          # パターン定義
+          declare -A PATTERNS
+          PATTERNS["APIキー"]="(api[_-]?key|apikey)['\"]?\s*[:=]\s*['\"][a-zA-Z0-9]{20,}['\"]"
+          PATTERNS["パスワード"]="(password|passwd|pwd)['\"]?\s*[:=]\s*['\"][^'\"]{8,}['\"]"
+          PATTERNS["シークレット"]="(secret|token)['\"]?\s*[:=]\s*['\"][a-zA-Z0-9]{20,}['\"]"
+          PATTERNS["AWS認証情報"]="AKIA[0-9A-Z]{16}"
+          PATTERNS["Google APIキー"]="AIza[0-9A-Za-z\\-_]{35}"
+          PATTERNS["GCPサービスアカウント"]="\"type\":\s*\"service_account\""
+          PATTERNS["プライベートキー"]="-----BEGIN (RSA |EC |DSA |)PRIVATE KEY-----"
+          PATTERNS["Basic認証"]="Basic\s+[A-Za-z0-9+/=]{20,}"
+          PATTERNS["Bearer Token"]="Bearer\s+[A-Za-z0-9\\-_.~+/]+=*"
+
+          # 除外パターン（テンプレート、コメント、ドキュメント）
+          EXCLUDE_PATTERNS="(example|sample|template|dummy|test|XXXX|YOUR_|<.*>|\{\{.*\}\})"
+
+          # チェック対象ファイル
+          FILES=$(find . -type f \( -name "*.js" -o -name "*.gs" -o -name "*.ts" -o -name "*.json" -o -name "*.html" -o -name "*.env*" -o -name "*.yml" -o -name "*.yaml" \) \
+            ! -path "./.git/*" \
+            ! -path "./node_modules/*" \
+            ! -path "./.npm-cache/*")
+
+          for pattern_name in "${!PATTERNS[@]}"; do
+            pattern="${PATTERNS[$pattern_name]}"
+            echo "--- $pattern_name チェック ---"
+
+            while IFS= read -r file; do
+              if [ -f "$file" ]; then
+                # パターンにマッチし、かつ除外パターンにマッチしない行を検出
+                matches=$(grep -inE "$pattern" "$file" 2>/dev/null | grep -ivE "$EXCLUDE_PATTERNS" || true)
+                if [ -n "$matches" ]; then
+                  echo "⚠️ $file で検出:"
+                  echo "$matches" | head -3
+                  echo "..."
+                  SECRETS_FOUND=$((SECRETS_FOUND + 1))
+                fi
+              fi
+            done <<< "$FILES"
+          done
+
+          echo ""
+          echo "==========================================="
+
+          if [ $SECRETS_FOUND -gt 0 ]; then
+            echo "❌ $SECRETS_FOUND 件の潜在的な機密情報を検出"
+            echo ""
+            echo "対処方法:"
+            echo "1. 本当の機密情報の場合: 即座に削除し、認証情報をローテーション"
+            echo "2. テンプレートの場合: プレースホルダー（YOUR_API_KEY等）を使用"
+            echo "3. 環境変数を使用: スクリプトプロパティまたはGitHub Secretsを利用"
+            echo ""
+            echo "secrets_found=$SECRETS_FOUND" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ 機密情報: 検出なし"
+            echo "secrets_found=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check .gitignore coverage
+        run: |
+          echo ""
+          echo "==========================================="
+          echo ".gitignore カバレッジチェック"
+          echo "==========================================="
+          echo ""
+
+          MISSING=0
+
+          # 必須の除外パターン
+          REQUIRED_PATTERNS=(
+            ".env"
+            "*.pem"
+            "*.key"
+            "credentials.json"
+            "service-account*.json"
+            "secrets/"
+          )
+
+          if [ -f ".gitignore" ]; then
+            for pattern in "${REQUIRED_PATTERNS[@]}"; do
+              if grep -qF "$pattern" .gitignore 2>/dev/null; then
+                echo "✅ $pattern: .gitignoreに含まれています"
+              else
+                echo "⚠️ $pattern: .gitignoreに追加を推奨"
+                MISSING=$((MISSING + 1))
+              fi
+            done
+          else
+            echo "❌ .gitignoreが存在しません"
+            MISSING=$((MISSING + 1))
+          fi
+
+          echo ""
+          if [ $MISSING -gt 0 ]; then
+            echo "⚠️ $MISSING 件の推奨パターンが.gitignoreにありません"
+          else
+            echo "✅ .gitignoreカバレッジ: 良好"
+          fi
+
+      - name: Check for hardcoded URLs
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "ハードコードURL検出"
+          echo "==========================================="
+          echo ""
+
+          # 内部URLやデプロイIDがハードコードされていないか
+          WARNINGS=0
+
+          # スプレッドシートID検出（44文字の英数字とハイフン）
+          SS_PATTERN="['\"][a-zA-Z0-9_-]{44}['\"]"
+
+          FILES=$(find . -type f \( -name "*.js" -o -name "*.gs" -o -name "*.html" \) \
+            ! -path "./.git/*" \
+            ! -path "./node_modules/*")
+
+          while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              matches=$(grep -onE "$SS_PATTERN" "$file" 2>/dev/null | head -3 || true)
+              if [ -n "$matches" ]; then
+                echo "⚠️ $file: スプレッドシートIDらしき文字列"
+                echo "   → スクリプトプロパティの使用を推奨"
+                WARNINGS=$((WARNINGS + 1))
+              fi
+            fi
+          done <<< "$FILES"
+
+          echo ""
+          if [ $WARNINGS -gt 0 ]; then
+            echo "⚠️ $WARNINGS 件の警告（確認推奨）"
+          else
+            echo "✅ ハードコードURL: 問題なし"
+          fi
+
+  # システム自体のポカヨケ
+  security-check-self-validation:
+    name: Security Check Self Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate security check configuration
+        run: |
+          echo "==========================================="
+          echo "セキュリティチェック自己検証"
+          echo "==========================================="
+          echo ""
+
+          # このワークフロー自体が正しく設定されているか
+          if [ -f ".github/workflows/security-check.yml" ]; then
+            echo "✅ security-check.yml: 存在"
+
+            # 必須のジョブが含まれているか
+            if grep -q "secret-detection" .github/workflows/security-check.yml; then
+              echo "✅ secret-detection job: 存在"
+            else
+              echo "❌ secret-detection job: 欠落"
+              exit 1
+            fi
+          else
+            echo "❌ security-check.yml: 存在しません"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ セキュリティチェック設定: 正常"

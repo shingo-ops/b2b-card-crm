@@ -1,0 +1,1240 @@
+<script>
+/**
+ * 採用診断アプリ - JavaScript
+ * PROJECT_MASTER v4 対応版
+ */
+
+// ===== グローバル変数 =====
+let currentScreen = 'welcome';
+let candidateId = null;
+let sections = [];
+let questions = {
+  disc: [],
+  bigfive: [],
+  situation: [],
+  freeform: [],
+  consistency: []
+};
+let practiceQuestions = {
+  disc: [],
+  bigfive: []
+};
+let currentSectionIndex = 0;
+let currentQuestionInSection = 0;
+let isPractice = false;
+let practiceQuestionIndex = 0;
+let answers = [];
+let timer = null;
+let timerInterval = null;
+let timeLeft = 15;
+let questionStartTime = null;
+let totalStartTime = null;
+let isAdmin = false;
+let isDiagnosisActive = false;
+let selectedOption = null;
+let selectedScaleValue = null;
+let breakCountdownTimer = null;
+let sectionIntroTimer = null;
+
+// DISCとBig Fiveのスコア（一貫性問題生成用）
+let discScores = { D: 0, I: 0, S: 0, C: 0 };
+let bigfiveScores = { Conscientiousness: 0, Agreeableness: 0, Neuroticism: 0, Openness: 0 };
+
+// セクション説明データ
+const sectionDescriptions = {
+  1: {
+    description: 'このセクションでは、あなたの行動スタイルについて質問します。\n4つの選択肢から最も当てはまるものを1つ選んでください。\n各質問には20秒の制限時間があります。',
+    diagramType: 'choice',
+    timeInfo: '各質問には20秒の制限時間があります'
+  },
+  2: {
+    description: 'このセクションでは、あなた自身について5段階で評価していただきます。\n自分に当てはまる度合いを選んでください。\n各質問には20秒の制限時間があります。',
+    diagramType: 'scale',
+    timeInfo: '各質問には20秒の制限時間があります'
+  },
+  3: {
+    description: 'このセクションでは、あなたの経験について自由に記述していただきます。\n各質問には3分の制限時間があります。',
+    diagramType: 'freeform',
+    timeInfo: '各質問には3分の制限時間があります'
+  },
+  4: {
+    description: '最後のセクションです。確認のための質問に回答してください。\n4つの選択肢から最も当てはまるものを1つ選んでください。\n各質問には20秒の制限時間があります。',
+    diagramType: 'choice',
+    timeInfo: '各質問には20秒の制限時間があります'
+  }
+};
+
+// ===== 初期化 =====
+document.addEventListener('DOMContentLoaded', function() {
+  // モバイル判定
+  if (isMobileDevice()) {
+    showScreen('mobile-block');
+    return;
+  }
+
+  // ブラウザの戻るボタン無効化
+  disableBrowserBack();
+
+  // セクション情報を取得
+  google.script.run
+    .withSuccessHandler(function(data) {
+      sections = data;
+    })
+    .withFailureHandler(handleError)
+    .getSections();
+
+  // 設問データを取得
+  google.script.run
+    .withSuccessHandler(function(data) {
+      questions.disc = data.disc || [];
+      questions.bigfive = data.bigfive || [];
+      questions.situation = data.situation || [];
+      questions.freeform = data.freeform || [];
+    })
+    .withFailureHandler(handleError)
+    .getAllQuestions();
+
+  // 練習問題を取得
+  google.script.run
+    .withSuccessHandler(function(data) {
+      practiceQuestions.disc = data.disc || [];
+      practiceQuestions.bigfive = data.bigfive || [];
+    })
+    .withFailureHandler(handleError)
+    .getPracticeQuestions();
+
+  // URL パラメータをチェック（管理画面直接アクセス）
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('admin') === 'true') {
+    showScreen('admin-login');
+  } else {
+    showScreen('welcome');
+  }
+
+  // 中断検知イベント
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('beforeunload', handleBeforeUnload);
+});
+
+// ===== モバイル判定 =====
+function isMobileDevice() {
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase()) ||
+         (window.innerWidth <= 768);
+}
+
+// ===== ブラウザの戻るボタン無効化 =====
+function disableBrowserBack() {
+  history.pushState(null, null, location.href);
+  window.addEventListener('popstate', function() {
+    history.pushState(null, null, location.href);
+  });
+}
+
+// ===== 中断検知 =====
+function handleVisibilityChange() {
+  if (!isDiagnosisActive) return;
+
+  if (document.hidden) {
+    recordInterruption('tab_hidden');
+  }
+}
+
+function handleBeforeUnload(e) {
+  if (!isDiagnosisActive) return;
+
+  recordInterruption('page_unload');
+
+  e.preventDefault();
+  e.returnValue = '診断が中断されます。よろしいですか？';
+  return e.returnValue;
+}
+
+function recordInterruption(type) {
+  if (!candidateId || !isDiagnosisActive) return;
+
+  google.script.run
+    .withSuccessHandler(function() {
+      isDiagnosisActive = false;
+      clearAllTimers();
+      showScreen('interruption-warning');
+    })
+    .withFailureHandler(function(error) {
+      console.error('中断記録エラー:', error);
+    })
+    .recordInterruption(candidateId, currentSectionIndex, currentQuestionInSection, type);
+}
+
+function clearAllTimers() {
+  if (timer) clearInterval(timer);
+  if (timerInterval) clearInterval(timerInterval);
+  if (breakCountdownTimer) clearInterval(breakCountdownTimer);
+  if (sectionIntroTimer) clearInterval(sectionIntroTimer);
+}
+
+// ===== 画面遷移 =====
+function showScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(screen => {
+    screen.classList.remove('active');
+  });
+  document.getElementById(screenId)?.classList.add('active');
+  currentScreen = screenId;
+  window.scrollTo(0, 0);
+}
+
+// ===== エラーハンドリング =====
+function handleError(error) {
+  console.error('Error:', error);
+  alert('エラーが発生しました: ' + (error.message || error));
+}
+
+// ===== ウェルカム画面 =====
+function startDiagnosis() {
+  showScreen('registration');
+  const checkbox = document.getElementById('consent-checkbox');
+  if (checkbox) {
+    checkbox.checked = false;
+    toggleStartButton();
+  }
+  resetRegistrationForm();
+}
+
+function goToAdmin() {
+  showScreen('admin-login');
+}
+
+// ===== フォームバリデーション =====
+
+// カタカナフィールドのバリデーション（フォーカスアウト時）
+function validateKatakanaField(input) {
+  const value = input.value.trim();
+  const katakanaRegex = /^[ァ-ヶー]+$/;
+  const hintId = 'hint-' + input.id.replace('reg-', '');
+  const hintElement = document.getElementById(hintId);
+
+  if (value === '') {
+    // 空の場合はエラー表示をクリア
+    input.classList.remove('input-error');
+    if (hintElement) {
+      hintElement.textContent = '全角カタカナで入力';
+      hintElement.classList.remove('error-hint');
+    }
+  } else if (!katakanaRegex.test(value)) {
+    // カタカナ以外が含まれている
+    input.classList.add('input-error');
+    if (hintElement) {
+      hintElement.textContent = '全角カタカナで入力してください';
+      hintElement.classList.add('error-hint');
+    }
+  } else {
+    // 正しいカタカナ
+    input.classList.remove('input-error');
+    if (hintElement) {
+      hintElement.textContent = '全角カタカナで入力';
+      hintElement.classList.remove('error-hint');
+    }
+  }
+
+  validateForm();
+}
+
+// カタカナかどうかをチェック（true/false を返す）
+function isValidKatakana(value) {
+  if (!value || value.trim() === '') return false;
+  const katakanaRegex = /^[ァ-ヶー]+$/;
+  return katakanaRegex.test(value.trim());
+}
+
+function formatPhoneNumber(input) {
+  const value = input.value;
+  const numbersOnly = value.replace(/[^0-9]/g, '');
+  if (value !== numbersOnly) {
+    input.value = numbersOnly;
+  }
+  validateForm();
+}
+
+// フォーム全体のバリデーション
+function validateForm() {
+  const lastName = document.getElementById('reg-last-name').value.trim();
+  const firstName = document.getElementById('reg-first-name').value.trim();
+  const lastNameKana = document.getElementById('reg-last-name-kana').value.trim();
+  const firstNameKana = document.getElementById('reg-first-name-kana').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+  const consent = document.getElementById('consent-checkbox')?.checked;
+
+  const katakanaRegex = /^[ァ-ヶー]+$/;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const phoneRegex = /^[0-9]{10,11}$/;
+
+  // すべての条件をチェック
+  const isValid =
+    lastName !== '' &&
+    firstName !== '' &&
+    lastNameKana !== '' &&
+    firstNameKana !== '' &&
+    katakanaRegex.test(lastNameKana) &&
+    katakanaRegex.test(firstNameKana) &&
+    email !== '' &&
+    emailRegex.test(email) &&
+    phone !== '' &&
+    phoneRegex.test(phone) &&
+    consent === true;
+
+  const btn = document.getElementById('start-diagnosis-btn');
+  if (btn) {
+    btn.disabled = !isValid;
+    btn.style.opacity = isValid ? '1' : '0.5';
+  }
+
+  return isValid;
+}
+
+// ===== 同意チェックボックス =====
+function toggleStartButton() {
+  // フォーム全体のバリデーションを実行
+  validateForm();
+}
+
+// ===== 候補者登録 =====
+function submitRegistration() {
+  const lastName = document.getElementById('reg-last-name').value.trim();
+  const firstName = document.getElementById('reg-first-name').value.trim();
+  const lastNameKana = document.getElementById('reg-last-name-kana').value.trim();
+  const firstNameKana = document.getElementById('reg-first-name-kana').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+  const consent = document.getElementById('consent-checkbox')?.checked;
+
+  // バリデーション
+  if (!lastName || !firstName || !lastNameKana || !firstNameKana || !email || !phone) {
+    alert('必須項目をすべて入力してください');
+    return;
+  }
+
+  const katakanaRegex = /^[ァ-ヶー]+$/;
+  if (!katakanaRegex.test(lastNameKana) || !katakanaRegex.test(firstNameKana)) {
+    alert('セイ・メイは全角カタカナで入力してください');
+    return;
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    alert('有効なメールアドレスを入力してください');
+    return;
+  }
+
+  if (!/^[0-9]{10,11}$/.test(phone)) {
+    alert('電話番号は10〜11桁の数字で入力してください');
+    return;
+  }
+
+  if (!consent) {
+    alert('同意にチェックを入れてください');
+    return;
+  }
+
+  showLoading('registration-form');
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      hideLoading('registration-form');
+
+      if (result.success) {
+        candidateId = result.candidateId;
+
+        if (result.status === 'completed') {
+          showScreen('already-completed');
+        } else if (result.status === 'interrupted') {
+          showScreen('already-interrupted');
+        } else {
+          startDiagnosisSession();
+        }
+      } else {
+        if (result.status === 'completed') {
+          showScreen('already-completed');
+        } else if (result.status === 'interrupted') {
+          showScreen('already-interrupted');
+        } else {
+          alert('登録に失敗しました: ' + result.error);
+        }
+      }
+    })
+    .withFailureHandler(function(error) {
+      hideLoading('registration-form');
+      handleError(error);
+    })
+    .registerCandidate({
+      lastName: lastName,
+      firstName: firstName,
+      lastNameKana: lastNameKana,
+      firstNameKana: firstNameKana,
+      email: email,
+      phone: phone
+    });
+}
+
+function resetRegistrationForm() {
+  document.getElementById('reg-last-name').value = '';
+  document.getElementById('reg-first-name').value = '';
+  document.getElementById('reg-last-name-kana').value = '';
+  document.getElementById('reg-first-name-kana').value = '';
+  document.getElementById('reg-email').value = '';
+  document.getElementById('reg-phone').value = '';
+}
+
+// ===== 診断セッション開始 =====
+function startDiagnosisSession() {
+  google.script.run
+    .withSuccessHandler(function() {
+      currentSectionIndex = 0;
+      currentQuestionInSection = 0;
+      answers = [];
+      totalStartTime = Date.now();
+      isDiagnosisActive = true;
+      discScores = { D: 0, I: 0, S: 0, C: 0 };
+      bigfiveScores = { Conscientiousness: 0, Agreeableness: 0, Neuroticism: 0, Openness: 0 };
+
+      showSectionIntro();
+    })
+    .withFailureHandler(handleError)
+    .startDiagnosisSession(candidateId);
+}
+
+// ===== セクション説明画面 =====
+function showSectionIntro() {
+  // 既存のタイマーをクリア
+  if (sectionIntroTimer) clearInterval(sectionIntroTimer);
+
+  const section = sections[currentSectionIndex];
+  const sectionInfo = sectionDescriptions[section.id] || {
+    description: 'このセクションの質問に回答してください。',
+    diagramType: 'choice',
+    timeInfo: '各質問には制限時間があります'
+  };
+
+  // タイトルとセクション名
+  document.getElementById('section-intro-title').textContent = '次のセクションについて';
+  document.getElementById('section-name').textContent = '';
+
+  // セクション説明
+  document.getElementById('section-description').textContent = sectionInfo.description;
+
+  // 制限時間情報
+  document.getElementById('intro-time-info').textContent = sectionInfo.timeInfo;
+
+  // 全ての図解を非表示
+  document.getElementById('intro-choice-diagram').style.display = 'none';
+  document.getElementById('intro-scale-diagram').style.display = 'none';
+  document.getElementById('intro-freeform-diagram').style.display = 'none';
+
+  // セクションに応じた図解を表示
+  if (sectionInfo.diagramType === 'choice') {
+    document.getElementById('intro-choice-diagram').style.display = 'block';
+  } else if (sectionInfo.diagramType === 'scale') {
+    document.getElementById('intro-scale-diagram').style.display = 'block';
+  } else if (sectionInfo.diagramType === 'freeform') {
+    document.getElementById('intro-freeform-diagram').style.display = 'block';
+  }
+
+  // プログレスバー（完了セクション数に応じて）
+  const progressPercent = (currentSectionIndex / sections.length) * 100;
+  document.getElementById('intro-progress-bar').style.width = progressPercent + '%';
+
+  // 練習問題の表示
+  const practiceInfo = document.getElementById('practice-info');
+  if (section.hasPractice && section.practiceCount > 0) {
+    practiceInfo.style.display = 'block';
+    document.getElementById('practice-count').textContent = section.practiceCount;
+  } else {
+    practiceInfo.style.display = 'none';
+  }
+
+  showScreen('section-intro');
+
+  // 20秒カウントダウンタイマー開始
+  startSectionIntroTimer();
+}
+
+// セクション説明画面の20秒タイマー
+function startSectionIntroTimer() {
+  const totalSeconds = 20;
+  let timeLeft = totalSeconds;
+  const timerBar = document.getElementById('intro-timer-bar');
+  const timerText = document.getElementById('intro-timer-text');
+
+  if (timerBar) {
+    timerBar.style.width = '100%';
+    timerBar.className = 'timer-progress-bar';
+  }
+  if (timerText) {
+    timerText.textContent = timeLeft + '秒';
+  }
+
+  sectionIntroTimer = setInterval(function() {
+    timeLeft -= 0.05;
+    const percentage = (timeLeft / totalSeconds) * 100;
+
+    if (timerBar) {
+      timerBar.style.width = percentage + '%';
+      if (timeLeft <= 5) {
+        timerBar.className = 'timer-progress-bar timer-danger';
+      } else if (timeLeft <= 10) {
+        timerBar.className = 'timer-progress-bar timer-warning';
+      }
+    }
+
+    if (timerText && Math.floor(timeLeft * 20) % 20 === 0) {
+      timerText.textContent = Math.ceil(timeLeft) + '秒';
+    }
+
+    if (timeLeft <= 0) {
+      clearInterval(sectionIntroTimer);
+      startSection();
+    }
+  }, 50);
+}
+
+// ===== セクション開始 =====
+function startSection() {
+  // 説明画面のタイマーをクリア
+  if (sectionIntroTimer) {
+    clearInterval(sectionIntroTimer);
+    sectionIntroTimer = null;
+  }
+
+  const section = sections[currentSectionIndex];
+  currentQuestionInSection = 0;
+  selectedOption = null;
+  selectedScaleValue = null;
+
+  // 練習問題がある場合は練習から開始
+  if (section.hasPractice && section.practiceCount > 0) {
+    isPractice = true;
+    practiceQuestionIndex = 0;
+    showPracticeQuestion();
+  } else {
+    isPractice = false;
+    showQuestion();
+  }
+}
+
+// ===== 練習問題表示 =====
+function showPracticeQuestion() {
+  const section = sections[currentSectionIndex];
+  let practiceQ;
+
+  if (section.type === 'disc') {
+    practiceQ = practiceQuestions.disc[practiceQuestionIndex];
+    showChoiceQuestion(practiceQ, true);
+  } else if (section.type === 'bigfive') {
+    practiceQ = practiceQuestions.bigfive[practiceQuestionIndex];
+    showScaleQuestion(practiceQ, true);
+  }
+}
+
+// ===== 設問画面（4択） =====
+function showChoiceQuestion(question, isPracticeMode) {
+  const section = sections[currentSectionIndex];
+
+  showScreen('question-choice');
+
+  // 練習バナー
+  const banner = document.getElementById('practice-banner');
+  if (isPracticeMode) {
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  // プログレス更新
+  document.getElementById('choice-current-section').textContent = section.id;
+  if (isPracticeMode) {
+    document.getElementById('choice-current-question').textContent = '練習' + (practiceQuestionIndex + 1);
+    document.getElementById('choice-total-questions').textContent = section.practiceCount;
+  } else {
+    document.getElementById('choice-current-question').textContent = currentQuestionInSection + 1;
+    document.getElementById('choice-total-questions').textContent = section.questionCount;
+  }
+
+  // 設問表示
+  document.getElementById('choice-question-text').textContent = question.text;
+
+  // 選択肢表示
+  const optionsContainer = document.getElementById('choice-options-container');
+  optionsContainer.innerHTML = '';
+
+  question.options.forEach((option, index) => {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = option.label;
+    btn.onclick = function() { selectChoiceOption(index); };
+    optionsContainer.appendChild(btn);
+  });
+
+  // 回答ボタンを無効化
+  selectedOption = null;
+  document.getElementById('choice-answer-btn').disabled = true;
+
+  // タイマー開始
+  startTimerBar('choice-timer-bar', section.timeLimit, handleChoiceTimeout);
+  questionStartTime = Date.now();
+}
+
+// 選択肢を選択
+function selectChoiceOption(index) {
+  const buttons = document.querySelectorAll('#choice-options-container .option-btn');
+  buttons.forEach((btn, i) => {
+    btn.classList.remove('selected');
+    if (i === index) {
+      btn.classList.add('selected');
+    }
+  });
+
+  selectedOption = index;
+  document.getElementById('choice-answer-btn').disabled = false;
+}
+
+// 4択回答を送信
+function submitChoiceAnswer() {
+  if (selectedOption === null) return;
+
+  clearAllTimers();
+
+  const section = sections[currentSectionIndex];
+  const responseTime = (Date.now() - questionStartTime) / 1000;
+
+  if (isPractice) {
+    // 練習問題
+    practiceQuestionIndex++;
+    if (practiceQuestionIndex >= section.practiceCount) {
+      // 練習終了、本番へ
+      isPractice = false;
+      showQuestion();
+    } else {
+      showPracticeQuestion();
+    }
+  } else {
+    // 本番
+    let question;
+    if (section.type === 'disc') {
+      // セクション1: DISC(16問) + Situation(4問)
+      if (currentQuestionInSection < questions.disc.length) {
+        question = questions.disc[currentQuestionInSection];
+      } else {
+        question = questions.situation[currentQuestionInSection - questions.disc.length];
+      }
+    } else if (section.type === 'consistency') {
+      question = questions.consistency[currentQuestionInSection];
+    }
+
+    const option = question.options[selectedOption];
+
+    // スコア計算（DISCの16問のみ）
+    if (section.type === 'disc' && currentQuestionInSection < questions.disc.length && option.type) {
+      discScores[option.type] += option.score || 1;
+    }
+
+    answers.push({
+      sectionId: section.id,
+      questionId: question.id,
+      selectedOption: option.label,
+      type: option.type || null,
+      score: option.score || 0,
+      responseTime: Math.round(responseTime * 10) / 10
+    });
+
+    // 進捗を保存
+    google.script.run.saveProgress(candidateId, currentSectionIndex, currentQuestionInSection);
+
+    currentQuestionInSection++;
+    showQuestion();
+  }
+}
+
+function handleChoiceTimeout() {
+  clearAllTimers();
+
+  const section = sections[currentSectionIndex];
+
+  if (isPractice) {
+    // 練習問題のタイムアウト
+    practiceQuestionIndex++;
+    if (practiceQuestionIndex >= section.practiceCount) {
+      isPractice = false;
+      showQuestion();
+    } else {
+      showPracticeQuestion();
+    }
+  } else {
+    // 本番のタイムアウト
+    let question;
+    if (section.type === 'disc') {
+      // セクション1: DISC(16問) + Situation(4問)
+      if (currentQuestionInSection < questions.disc.length) {
+        question = questions.disc[currentQuestionInSection];
+      } else {
+        question = questions.situation[currentQuestionInSection - questions.disc.length];
+      }
+    } else if (section.type === 'consistency') {
+      question = questions.consistency[currentQuestionInSection];
+    }
+
+    answers.push({
+      sectionId: section.id,
+      questionId: question.id,
+      selectedOption: 'タイムアウト',
+      type: null,
+      score: 0,
+      responseTime: section.timeLimit
+    });
+
+    google.script.run.saveProgress(candidateId, currentSectionIndex, currentQuestionInSection);
+
+    currentQuestionInSection++;
+    showQuestion();
+  }
+}
+
+// ===== 設問画面（5段階評価） =====
+function showScaleQuestion(question, isPracticeMode) {
+  const section = sections[currentSectionIndex];
+
+  showScreen('question-scale');
+
+  // 練習バナー
+  const banner = document.getElementById('scale-practice-banner');
+  if (isPracticeMode) {
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  // プログレス更新
+  document.getElementById('scale-current-section').textContent = section.id;
+  if (isPracticeMode) {
+    document.getElementById('scale-current-question').textContent = '練習' + (practiceQuestionIndex + 1);
+    document.getElementById('scale-total-questions').textContent = section.practiceCount;
+  } else {
+    document.getElementById('scale-current-question').textContent = currentQuestionInSection + 1;
+    document.getElementById('scale-total-questions').textContent = section.questionCount;
+  }
+
+  // 設問表示
+  document.getElementById('scale-question-text').textContent = question.text;
+
+  // スケールボタンをリセット
+  const scaleButtons = document.querySelectorAll('.scale-btn');
+  scaleButtons.forEach(btn => btn.classList.remove('selected'));
+
+  // 回答ボタンを無効化
+  selectedScaleValue = null;
+  document.getElementById('scale-answer-btn').disabled = true;
+
+  // タイマー開始
+  startTimerBar('scale-timer-bar', section.timeLimit, handleScaleTimeout);
+  questionStartTime = Date.now();
+}
+
+// スケール選択
+function selectScale(btn, value) {
+  const scaleButtons = document.querySelectorAll('.scale-btn');
+  scaleButtons.forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+
+  selectedScaleValue = value;
+  document.getElementById('scale-answer-btn').disabled = false;
+}
+
+// 5段階評価回答を送信
+function submitScaleAnswer() {
+  if (selectedScaleValue === null) return;
+
+  clearAllTimers();
+
+  const section = sections[currentSectionIndex];
+  const responseTime = (Date.now() - questionStartTime) / 1000;
+
+  if (isPractice) {
+    practiceQuestionIndex++;
+    if (practiceQuestionIndex >= section.practiceCount) {
+      isPractice = false;
+      showQuestion();
+    } else {
+      showPracticeQuestion();
+    }
+  } else {
+    // セクション2: Big Fiveのみ
+    const question = questions.bigfive[currentQuestionInSection];
+
+    // Big Fiveスコア計算
+    if (question.trait) {
+      let score = selectedScaleValue;
+      if (question.reversed) {
+        score = 6 - score; // 逆転項目
+      }
+      bigfiveScores[question.trait] += score;
+    }
+
+    answers.push({
+      sectionId: section.id,
+      questionId: question.id,
+      scaleValue: selectedScaleValue,
+      trait: question.trait || null,
+      reversed: question.reversed || false,
+      responseTime: Math.round(responseTime * 10) / 10
+    });
+
+    google.script.run.saveProgress(candidateId, currentSectionIndex, currentQuestionInSection);
+
+    currentQuestionInSection++;
+    showQuestion();
+  }
+}
+
+function handleScaleTimeout() {
+  clearAllTimers();
+
+  const section = sections[currentSectionIndex];
+
+  if (isPractice) {
+    practiceQuestionIndex++;
+    if (practiceQuestionIndex >= section.practiceCount) {
+      isPractice = false;
+      showQuestion();
+    } else {
+      showPracticeQuestion();
+    }
+  } else {
+    // セクション2: Big Fiveのみ
+    const question = questions.bigfive[currentQuestionInSection];
+
+    answers.push({
+      sectionId: section.id,
+      questionId: question.id,
+      scaleValue: null,
+      trait: question.trait || null,
+      responseTime: section.timeLimit,
+      timeout: true
+    });
+
+    google.script.run.saveProgress(candidateId, currentSectionIndex, currentQuestionInSection);
+
+    currentQuestionInSection++;
+    showQuestion();
+  }
+}
+
+// ===== 設問画面（自由記述） =====
+function showFreeformQuestion(question) {
+  const section = sections[currentSectionIndex];
+
+  showScreen('question-freeform');
+
+  // プログレス更新
+  document.getElementById('freeform-current-section').textContent = section.id;
+  document.getElementById('freeform-current-question').textContent = currentQuestionInSection + 1;
+  document.getElementById('freeform-total-questions').textContent = section.questionCount;
+
+  // 設問表示
+  document.getElementById('freeform-question-text').textContent = question.text;
+
+  // テキストエリアをクリア
+  const textarea = document.getElementById('freeform-textarea');
+  textarea.value = '';
+  document.getElementById('char-count').textContent = '0';
+
+  // タイマー開始（自由記述は180秒）
+  startFreeformTimer(section.timeLimit);
+  questionStartTime = Date.now();
+}
+
+// 文字数カウント更新
+function updateCharCount() {
+  const textarea = document.getElementById('freeform-textarea');
+  const count = textarea.value.length;
+  document.getElementById('char-count').textContent = count;
+}
+
+// 自由記述タイマー（カウントダウン表示あり）
+function startFreeformTimer(totalSeconds) {
+  timeLeft = totalSeconds;
+  const progressBar = document.getElementById('freeform-timer-bar');
+  const timeDisplay = document.getElementById('freeform-time-remaining');
+
+  progressBar.style.width = '100%';
+  progressBar.className = 'timer-progress-bar';
+
+  function updateDisplay() {
+    const minutes = Math.floor(timeLeft / 60);
+    const seconds = Math.floor(timeLeft % 60);
+    timeDisplay.textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  updateDisplay();
+
+  timerInterval = setInterval(function() {
+    timeLeft -= 0.05;
+    const percentage = (timeLeft / totalSeconds) * 100;
+    progressBar.style.width = percentage + '%';
+
+    if (timeLeft <= 30) {
+      progressBar.className = 'timer-progress-bar timer-danger';
+    } else if (timeLeft <= 60) {
+      progressBar.className = 'timer-progress-bar timer-warning';
+    }
+
+    if (Math.floor(timeLeft * 20) % 20 === 0) {
+      updateDisplay();
+    }
+
+    if (timeLeft <= 0) {
+      clearAllTimers();
+      submitFreeformAnswer();
+    }
+  }, 50);
+}
+
+// 自由記述回答を送信
+function submitFreeformAnswer() {
+  clearAllTimers();
+
+  const section = sections[currentSectionIndex];
+  const textarea = document.getElementById('freeform-textarea');
+  const answer = textarea.value.trim();
+  const responseTime = (Date.now() - questionStartTime) / 1000;
+
+  const question = questions.freeform[currentQuestionInSection];
+
+  answers.push({
+    sectionId: section.id,
+    questionId: question.id,
+    freeformAnswer: answer,
+    charCount: answer.length,
+    responseTime: Math.round(responseTime * 10) / 10
+  });
+
+  google.script.run.saveProgress(candidateId, currentSectionIndex, currentQuestionInSection);
+
+  currentQuestionInSection++;
+  showQuestion();
+}
+
+// ===== メイン設問表示ロジック =====
+function showQuestion() {
+  const section = sections[currentSectionIndex];
+
+  // セクション内の全質問を回答したか確認
+  if (currentQuestionInSection >= section.questionCount) {
+    // セクション完了
+    if (currentSectionIndex < sections.length - 1) {
+      showSectionBreak();
+    } else {
+      finishDiagnosis();
+    }
+    return;
+  }
+
+  // セクションタイプに応じて適切な画面を表示
+  if (section.type === 'disc') {
+    // セクション1: DISC(16問) + Situation(4問) = 全て4択
+    if (currentQuestionInSection < questions.disc.length) {
+      showChoiceQuestion(questions.disc[currentQuestionInSection], false);
+    } else {
+      const situationIndex = currentQuestionInSection - questions.disc.length;
+      showChoiceQuestion(questions.situation[situationIndex], false);
+    }
+  } else if (section.type === 'bigfive') {
+    // セクション2: Big Five(16問)のみ = 全て5段階
+    showScaleQuestion(questions.bigfive[currentQuestionInSection], false);
+  } else if (section.type === 'freeform') {
+    showFreeformQuestion(questions.freeform[currentQuestionInSection]);
+  } else if (section.type === 'consistency') {
+    // 一貫性チェック問題を生成（セクション開始時）
+    if (currentQuestionInSection === 0) {
+      google.script.run
+        .withSuccessHandler(function(consistencyQ) {
+          questions.consistency = consistencyQ;
+          showChoiceQuestion(questions.consistency[currentQuestionInSection], false);
+        })
+        .withFailureHandler(handleError)
+        .generateConsistencyQuestions(discScores, bigfiveScores);
+    } else {
+      showChoiceQuestion(questions.consistency[currentQuestionInSection], false);
+    }
+  }
+}
+
+// ===== タイマーバー（数字なし） =====
+function startTimerBar(barId, totalSeconds, timeoutCallback) {
+  timeLeft = totalSeconds;
+  const progressBar = document.getElementById(barId);
+
+  progressBar.style.width = '100%';
+  progressBar.className = 'timer-progress-bar';
+
+  timerInterval = setInterval(function() {
+    timeLeft -= 0.05;
+    const percentage = (timeLeft / totalSeconds) * 100;
+    progressBar.style.width = percentage + '%';
+
+    if (timeLeft <= 2) {
+      progressBar.className = 'timer-progress-bar timer-danger';
+    } else if (timeLeft <= 5) {
+      progressBar.className = 'timer-progress-bar timer-warning';
+    }
+
+    if (timeLeft <= 0) {
+      clearAllTimers();
+      timeoutCallback();
+    }
+  }, 50);
+}
+
+// ===== セクション休憩画面 =====
+function showSectionBreak() {
+  document.getElementById('completed-section').textContent = sections[currentSectionIndex].id;
+  document.getElementById('remaining-sections').textContent = sections.length - currentSectionIndex - 1;
+
+  let countdown = 5;
+  document.getElementById('break-countdown').textContent = countdown;
+
+  showScreen('section-break');
+
+  breakCountdownTimer = setInterval(function() {
+    countdown--;
+    document.getElementById('break-countdown').textContent = countdown;
+
+    if (countdown <= 0) {
+      clearInterval(breakCountdownTimer);
+      goToNextSection();
+    }
+  }, 1000);
+}
+
+function skipBreak() {
+  if (breakCountdownTimer) {
+    clearInterval(breakCountdownTimer);
+  }
+  goToNextSection();
+}
+
+function goToNextSection() {
+  currentSectionIndex++;
+  currentQuestionInSection = 0;
+  isPractice = false;
+  practiceQuestionIndex = 0;
+  showSectionIntro();
+}
+
+// ===== 診断完了 =====
+function finishDiagnosis() {
+  clearAllTimers();
+  isDiagnosisActive = false;
+
+  showScreen('saving');
+
+  const totalTime = Math.round((Date.now() - totalStartTime) / 1000);
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.success) {
+        displayResult(result);
+      } else {
+        alert('結果の保存に失敗しました: ' + result.error);
+        showScreen('welcome');
+      }
+    })
+    .withFailureHandler(handleError)
+    .saveDiagnosisResult(candidateId, answers, totalTime, discScores, bigfiveScores);
+}
+
+function displayResult(result) {
+  showScreen('result');
+  document.getElementById('diagnosis-id').textContent = result.diagnosisId;
+}
+
+function backToWelcome() {
+  candidateId = null;
+  answers = [];
+  currentSectionIndex = 0;
+  currentQuestionInSection = 0;
+  isDiagnosisActive = false;
+
+  resetRegistrationForm();
+  showScreen('welcome');
+}
+
+// ===== 管理画面 =====
+function submitAdminLogin() {
+  const password = document.getElementById('admin-password').value;
+
+  google.script.run
+    .withSuccessHandler(function(authenticated) {
+      if (authenticated) {
+        isAdmin = true;
+        loadAdminDashboard();
+      } else {
+        alert('パスワードが正しくありません');
+      }
+    })
+    .withFailureHandler(handleError)
+    .authenticateAdmin(password);
+}
+
+function loadAdminDashboard() {
+  showScreen('admin-dashboard');
+
+  google.script.run
+    .withSuccessHandler(function(stats) {
+      document.getElementById('stat-total').textContent = stats.totalCandidates;
+      document.getElementById('stat-completed').textContent = stats.diagnosisCompleted;
+      document.getElementById('stat-waiting').textContent = stats.diagnosisWaiting;
+      document.getElementById('stat-interrupted').textContent = stats.interrupted || 0;
+    })
+    .withFailureHandler(handleError)
+    .getDashboardStats();
+
+  loadCandidatesList();
+}
+
+function loadCandidatesList() {
+  google.script.run
+    .withSuccessHandler(function(candidates) {
+      const tbody = document.getElementById('candidates-tbody');
+      tbody.innerHTML = '';
+
+      candidates.forEach(function(c) {
+        const row = document.createElement('tr');
+        let statusClass = 'waiting';
+        if (c.status === '診断完了') statusClass = 'completed';
+        else if (c.status === '中断') statusClass = 'interrupted';
+        else if (c.status === '診断中') statusClass = 'in-progress';
+
+        row.innerHTML = `
+          <td>${c.candidateId}</td>
+          <td>${c.name}</td>
+          <td>${c.email}</td>
+          <td><span class="status-badge ${statusClass}">${c.status}</span></td>
+          <td>${formatDate(c.createdAt)}</td>
+          <td>
+            <button class="btn btn-secondary" onclick="viewCandidateDetail('${c.candidateId}')" style="padding: 4px 12px; font-size: 12px;">詳細</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    })
+    .withFailureHandler(handleError)
+    .getAllCandidates();
+}
+
+function viewCandidateDetail(candidateId) {
+  google.script.run
+    .withSuccessHandler(function(candidate) {
+      if (!candidate) {
+        alert('候補者が見つかりません');
+        return;
+      }
+
+      document.getElementById('detail-candidate-id').textContent = candidate.candidateId;
+      document.getElementById('detail-name').textContent = candidate.name;
+      document.getElementById('detail-email').textContent = candidate.email;
+      document.getElementById('detail-phone').textContent = candidate.phone || '-';
+      document.getElementById('detail-status').textContent = candidate.status;
+
+      google.script.run
+        .withSuccessHandler(function(diagnosis) {
+          if (diagnosis) {
+            document.getElementById('detail-diagnosis').innerHTML = `
+              <div class="scores-grid" style="margin-top: 10px;">
+                <div class="score-card type-D">
+                  <div class="type-name">D (主導型)</div>
+                  <div class="score-value">${diagnosis.scores.D}</div>
+                </div>
+                <div class="score-card type-I">
+                  <div class="type-name">I (感化型)</div>
+                  <div class="score-value">${diagnosis.scores.I}</div>
+                </div>
+                <div class="score-card type-S">
+                  <div class="type-name">S (安定型)</div>
+                  <div class="score-value">${diagnosis.scores.S}</div>
+                </div>
+                <div class="score-card type-C">
+                  <div class="type-name">C (慎重型)</div>
+                  <div class="score-value">${diagnosis.scores.C}</div>
+                </div>
+              </div>
+              <p style="margin-top: 15px;"><strong>主要タイプ:</strong> ${diagnosis.primaryType} / <strong>サブタイプ:</strong> ${diagnosis.secondaryType}</p>
+              <p><strong>一貫性スコア:</strong> ${diagnosis.consistencyScore || '-'}</p>
+            `;
+          } else {
+            document.getElementById('detail-diagnosis').innerHTML = '<p style="color: #666;">診断未完了</p>';
+          }
+        })
+        .getCandidateDiagnosis(candidateId);
+
+      showModal('candidate-detail-modal');
+    })
+    .withFailureHandler(handleError)
+    .getCandidate(candidateId);
+}
+
+function logoutAdmin() {
+  isAdmin = false;
+  document.getElementById('admin-password').value = '';
+  showScreen('welcome');
+}
+
+// ===== タブ切り替え =====
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.add('hidden');
+  });
+  document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+
+  if (tabName === 'candidates') {
+    loadCandidatesList();
+  }
+}
+
+// ===== モーダル =====
+function showModal(modalId) {
+  document.getElementById(modalId).classList.add('active');
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.remove('active');
+}
+
+// ===== ローディング =====
+function showLoading(containerId) {
+  const container = document.getElementById(containerId);
+  if (container) {
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.id = containerId + '-loading';
+    loading.innerHTML = '<div class="spinner"></div><div class="loading-text">処理中...</div>';
+    container.appendChild(loading);
+  }
+}
+
+function hideLoading(containerId) {
+  const loading = document.getElementById(containerId + '-loading');
+  if (loading) {
+    loading.remove();
+  }
+}
+
+// ===== ユーティリティ =====
+function formatDate(dateString) {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+}
+</script>

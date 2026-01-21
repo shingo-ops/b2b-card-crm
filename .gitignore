@@ -1,0 +1,45 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node modules
+node_modules/
+
+# clasp credentials (機密情報)
+.clasprc.json
+
+# OAuth credentials (機密情報)
+**/creds.json
+
+# clasp project settings (GCPプロジェクトIDを含む可能性)
+# 注: scriptIdは公開しても問題ないが、projectIdは避けるべき
+# .clasp.json  # コメントアウト: scriptIdのみなら公開可。projectId追加時は要検討
+
+# 環境変数（機密情報）
+.env
+.env.local
+.env.*.local
+.dashboard-sync.env
+
+# 一時ファイル
+*.log
+*.tmp
+*.bak
+
+# ZIPファイル
+*.zip
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# 会話ログ（必要に応じて除外）
+# conversation-log/
+
+# npm cache
+.npm-cache/
+
+# Conversation tracking temp files
+.conversation-last-line_*

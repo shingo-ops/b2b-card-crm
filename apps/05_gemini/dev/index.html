@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <?!= include('style'); ?>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="sidebar-title">統合ダッシュボード</h1>
+        <span class="env-badge">PROP</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <!-- KGI分析 Category -->
+        <div class="nav-category">
+          <div class="nav-category-label">KGI分析</div>
+          <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+            <span class="nav-icon">📊</span>
+            <span class="nav-text">ダッシュボード</span>
+          </button>
+          <button class="nav-item" data-tab="conversation" onclick="switchTab('conversation')">
+            <span class="nav-icon">💬</span>
+            <span class="nav-text">会話ログ</span>
+          </button>
+          <button class="nav-item" data-tab="defect" onclick="switchTab('defect')">
+            <span class="nav-icon">⚠️</span>
+            <span class="nav-text">不具合</span>
+          </button>
+          <button class="nav-item" data-tab="pokayoke" onclick="switchTab('pokayoke')">
+            <span class="nav-icon">🛡️</span>
+            <span class="nav-text">ポカヨケ</span>
+          </button>
+          <button class="nav-item" data-tab="gemini" onclick="switchTab('gemini')">
+            <span class="nav-icon">🔹</span>
+            <span class="nav-text">Gemini</span>
+          </button>
+          <button class="nav-item" data-tab="claude" onclick="switchTab('claude')">
+            <span class="nav-icon">🔸</span>
+            <span class="nav-text">Claude</span>
+          </button>
+        </div>
+
+        <!-- 情報・通知 Category -->
+        <div class="nav-category">
+          <div class="nav-category-label">情報・通知</div>
+          <button class="nav-item" data-tab="notifications" onclick="switchTab('notifications')">
+            <span class="nav-icon">🔔</span>
+            <span class="nav-text">お知らせ</span>
+            <span class="nav-badge" id="navNotificationBadge" style="display: none;">0</span>
+          </button>
+          <button class="nav-item" data-tab="business-context" onclick="switchTab('business-context')">
+            <span class="nav-icon">🏢</span>
+            <span class="nav-text">ビジネス</span>
+          </button>
+          <button class="nav-item" data-tab="external-api" onclick="switchTab('external-api')">
+            <span class="nav-icon">🔌</span>
+            <span class="nav-text">外部API</span>
+          </button>
+          <button class="nav-item" data-tab="settings-policy" onclick="switchTab('settings-policy')">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-text">設定ポリシー</span>
+          </button>
+        </div>
+
+        <!-- プロジェクト管理 Category -->
+        <div class="nav-category">
+          <div class="nav-category-label">プロジェクト管理</div>
+          <button class="nav-item" data-tab="tps" onclick="switchTab('tps')">
+            <span class="nav-icon">🏭</span>
+            <span class="nav-text">TPS原則</span>
+          </button>
+          <button class="nav-item" data-tab="specs" onclick="switchTab('specs')">
+            <span class="nav-icon">📋</span>
+            <span class="nav-text">仕様書</span>
+          </button>
+          <button class="nav-item" data-tab="philosophy" onclick="switchTab('philosophy')">
+            <span class="nav-icon">📖</span>
+            <span class="nav-text">ページ概要</span>
+          </button>
+          <button class="nav-item" data-tab="projects" onclick="switchTab('projects')">
+            <span class="nav-icon">🔗</span>
+            <span class="nav-text">関連プロジェクト</span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="health-badge" id="healthScore">Health: --</div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="header">
+        <h2 class="page-title" id="pageTitle">Overview</h2>
+        <div class="header-actions">
+          <!-- お知らせベル -->
+          <div class="notification-wrapper">
+            <button class="notification-bell" id="notificationBell" onclick="toggleNotificationPanel()">
+              <span class="bell-icon">🔔</span>
+              <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+            </button>
+            <!-- お知らせパネル -->
+            <div class="notification-panel" id="notificationPanel" style="display: none;">
+              <div class="notification-header">
+                <span class="notification-title">お知らせ</span>
+                <button class="mark-all-read" onclick="markAllAsRead()">すべて既読</button>
+              </div>
+              <div class="notification-list" id="notificationList">
+                <!-- お知らせアイテムがここに表示される -->
+              </div>
+              <div class="notification-footer">
+                <button class="show-all-btn" onclick="switchTab('notifications')">すべて表示</button>
+              </div>
+            </div>
+          </div>
+          <button class="refresh-btn" id="refreshBtn" onclick="fetchAllData()">
+            <span>&#x1F504;</span>
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Alert Banner -->
+      <div id="alertBanner" class="alert-banner">
+        <span id="alertMessage"></span>
+      </div>
+
+      <!-- Loading -->
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p style="margin-top: 15px;">Loading...</p>
+      </div>
+
+      <!-- Content Area -->
+      <div id="mainContent" class="content-area dark-theme-base" style="display: none;">
+
+      <!-- Dashboard Tab (KGI分析ダッシュボード) -->
+      <div id="tab-dashboard" class="tab-content active">
+        <!-- Hero: 0介入日連続達成 -->
+        <div class="kgi-hero">
+          <div class="kgi-hero-main">
+            <div class="kgi-hero-value" id="zeroInterventionDays">0</div>
+            <div class="kgi-hero-label">人間の0介入日<br>連続達成日数</div>
+          </div>
+          <div class="kgi-hero-target">
+            <span class="target-label">目標</span>
+            <span class="target-value">∞</span>
+          </div>
+        </div>
+
+        <!-- 直近3ヶ月 カンバン -->
+        <div class="section-title dark">直近3ヶ月の累計</div>
+        <div class="kanban-grid">
+          <div class="kanban-card feedback">
+            <div class="kanban-icon">🔴</div>
+            <div class="kanban-value" id="quarter-feedback">0</div>
+            <div class="kanban-label">指摘</div>
+          </div>
+          <div class="kanban-card request">
+            <div class="kanban-icon">🔵</div>
+            <div class="kanban-value" id="quarter-request">0</div>
+            <div class="kanban-label">依頼</div>
+          </div>
+          <div class="kanban-card question">
+            <div class="kanban-icon">🟡</div>
+            <div class="kanban-value" id="quarter-question">0</div>
+            <div class="kanban-label">説明</div>
+          </div>
+          <div class="kanban-card bug">
+            <div class="kanban-icon">🟠</div>
+            <div class="kanban-value" id="quarter-bug">0</div>
+            <div class="kanban-label">バグ報告</div>
+          </div>
+          <div class="kanban-card recurrence">
+            <div class="kanban-icon">🟣</div>
+            <div class="kanban-value" id="quarter-recurrence">0</div>
+            <div class="kanban-label">再発報告</div>
+          </div>
+        </div>
+
+        <!-- 直近7日間 カンバン -->
+        <div class="section-title dark" style="margin-top: 30px;">直近7日間</div>
+        <div class="kanban-grid small">
+          <div class="kanban-card-small feedback">
+            <div class="kanban-value-small" id="week-feedback">0</div>
+            <div class="kanban-label-small">指摘</div>
+          </div>
+          <div class="kanban-card-small request">
+            <div class="kanban-value-small" id="week-request">0</div>
+            <div class="kanban-label-small">依頼</div>
+          </div>
+          <div class="kanban-card-small question">
+            <div class="kanban-value-small" id="week-question">0</div>
+            <div class="kanban-label-small">説明</div>
+          </div>
+          <div class="kanban-card-small bug">
+            <div class="kanban-value-small" id="week-bug">0</div>
+            <div class="kanban-label-small">バグ</div>
+          </div>
+          <div class="kanban-card-small recurrence">
+            <div class="kanban-value-small" id="week-recurrence">0</div>
+            <div class="kanban-label-small">再発</div>
+          </div>
+        </div>
+
+        <!-- 解釈率スコア -->
+        <div class="section-title dark" style="margin-top: 30px;">解釈率スコア</div>
+        <div class="interpretation-score-card">
+          <div class="interpretation-score">
+            <div class="score-value" id="interpretationScore">100</div>
+            <div class="score-label">%</div>
+          </div>
+          <div class="interpretation-desc">
+            <p>解釈 = 事実から意図を把握すること</p>
+            <p>予測 = 推測で意図を想像すること</p>
+            <p class="interpretation-target">目標: 解釈率100%（予測0%）</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gemini Tab -->
+      <div id="tab-gemini" class="tab-content">
+        <div class="section-title">Gemini Usage (Today)</div>
+        <div class="cards-grid">
+          <!-- Daily Usage -->
+          <div class="card usage-main">
+            <div class="card-header">
+              <span class="card-title">Daily Usage</span>
+              <span class="card-icon">&#x1F4CA;</span>
+            </div>
+            <div class="usage-value" id="geminiUsageValue">0</div>
+            <div class="usage-limit">/ <span id="geminiUsageLimit">1000</span> requests</div>
+            <div class="progress-container">
+              <div class="progress-bar normal" id="geminiProgressBar" style="width: 0%"></div>
+            </div>
+            <div class="progress-labels">
+              <span>0%</span>
+              <span id="geminiPercentLabel">0%</span>
+              <span>100%</span>
+            </div>
+          </div>
+
+          <!-- Reset Timer -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Reset In</span>
+              <span class="card-icon">&#x1F504;</span>
+            </div>
+            <div class="stat-value" id="geminiResetTime">--:--</div>
+            <div class="stat-label">until midnight</div>
+          </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        <div class="section-title" style="margin-top: 20px;">Category Breakdown (5W2H)</div>
+        <div class="category-grid">
+          <div class="category-card" data-category="audit">
+            <div class="category-icon">&#x1F50D;</div>
+            <div class="category-name">Audit</div>
+            <div class="category-count" id="geminiAuditCount">0</div>
+            <div class="category-percent" id="geminiAuditPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill" id="geminiAuditBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="search">
+            <div class="category-icon">&#x1F50E;</div>
+            <div class="category-name">Search</div>
+            <div class="category-count" id="geminiSearchCount">0</div>
+            <div class="category-percent" id="geminiSearchPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill" id="geminiSearchBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="review">
+            <div class="category-icon">&#x1F4DD;</div>
+            <div class="category-name">Review</div>
+            <div class="category-count" id="geminiReviewCount">0</div>
+            <div class="category-percent" id="geminiReviewPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill" id="geminiReviewBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="design">
+            <div class="category-icon">&#x1F3A8;</div>
+            <div class="category-name">Design</div>
+            <div class="category-count" id="geminiDesignCount">0</div>
+            <div class="category-percent" id="geminiDesignPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill" id="geminiDesignBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="other">
+            <div class="category-icon">&#x2699;</div>
+            <div class="category-name">Other</div>
+            <div class="category-count" id="geminiOtherCount">0</div>
+            <div class="category-percent" id="geminiOtherPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill" id="geminiOtherBar" style="width: 0%"></div></div>
+          </div>
+        </div>
+
+        <!-- History Chart -->
+        <div class="section-title" style="margin-top: 20px;">History (Last 7 Days)</div>
+        <div class="card history-card">
+          <div class="chart-container" id="geminiHistoryChart"></div>
+        </div>
+      </div>
+
+      <!-- Claude Tab -->
+      <div id="tab-claude" class="tab-content">
+        <div class="section-title">Claude Usage (Today)</div>
+        <div class="cards-grid">
+          <!-- Daily Sessions -->
+          <div class="card usage-main">
+            <div class="card-header">
+              <span class="card-title">Today's Sessions</span>
+              <span class="card-icon">&#x1F916;</span>
+            </div>
+            <div class="usage-value" id="claudeUsageValue">0</div>
+            <div class="usage-limit">sessions</div>
+          </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        <div class="section-title" style="margin-top: 20px;">Category Breakdown (5W2H)</div>
+        <div class="category-grid">
+          <div class="category-card" data-category="development">
+            <div class="category-icon">&#x1F4BB;</div>
+            <div class="category-name">Development</div>
+            <div class="category-count" id="claudeDevelopmentCount">0</div>
+            <div class="category-percent" id="claudeDevelopmentPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill claude" id="claudeDevelopmentBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="fix">
+            <div class="category-icon">&#x1F527;</div>
+            <div class="category-name">Fix</div>
+            <div class="category-count" id="claudeFixCount">0</div>
+            <div class="category-percent" id="claudeFixPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill claude" id="claudeFixBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="research">
+            <div class="category-icon">&#x1F4D6;</div>
+            <div class="category-name">Research</div>
+            <div class="category-count" id="claudeResearchCount">0</div>
+            <div class="category-percent" id="claudeResearchPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill claude" id="claudeResearchBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="doc">
+            <div class="category-icon">&#x1F4C4;</div>
+            <div class="category-name">Document</div>
+            <div class="category-count" id="claudeDocCount">0</div>
+            <div class="category-percent" id="claudeDocPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill claude" id="claudeDocBar" style="width: 0%"></div></div>
+          </div>
+          <div class="category-card" data-category="config">
+            <div class="category-icon">&#x2699;</div>
+            <div class="category-name">Config</div>
+            <div class="category-count" id="claudeConfigCount">0</div>
+            <div class="category-percent" id="claudeConfigPercent">0%</div>
+            <div class="category-bar"><div class="category-bar-fill claude" id="claudeConfigBar" style="width: 0%"></div></div>
+          </div>
+        </div>
+
+        <!-- History Chart -->
+        <div class="section-title" style="margin-top: 20px;">History (Last 7 Days)</div>
+        <div class="card history-card">
+          <div class="chart-container" id="claudeHistoryChart"></div>
+        </div>
+      </div>
+
+      <!-- 不具合 Tab (Dark Theme) -->
+      <div id="tab-defect" class="tab-content dark-theme">
+        <!-- KGI + KPI + 直近3ヶ月（統一カンバン） -->
+        <div class="unified-kanban-row">
+          <!-- KGI: 0不良日連続達成 -->
+          <div class="unified-card kgi">
+            <div class="unified-card-badge">KGI</div>
+            <div class="unified-card-value" id="defectStreak">0</div>
+            <div class="unified-card-label">0不良日<br>連続達成</div>
+          </div>
+          <!-- KPI: 再発発生数 -->
+          <div class="unified-card kpi">
+            <div class="unified-card-badge">KPI</div>
+            <div class="unified-card-value" id="defectRecurrenceKPI">0<span class="unified-card-unit">件</span></div>
+            <div class="unified-card-label">再発数</div>
+          </div>
+          <!-- 直近3ヶ月: 不具合数 -->
+          <div class="unified-card defect-total">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="defect-quarter-total">0</div>
+            <div class="unified-card-label">不具合数</div>
+          </div>
+          <!-- 直近3ヶ月: 再発数 -->
+          <div class="unified-card recurrence">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="defect-quarter-recurrence">0</div>
+            <div class="unified-card-label">再発数</div>
+          </div>
+          <!-- 直近3ヶ月: 最終不具合日 -->
+          <div class="unified-card last-defect">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value small-text" id="defect-last-date">--</div>
+            <div class="unified-card-label">最終不具合日</div>
+          </div>
+        </div>
+
+        <!-- 直近7日間 カンバン -->
+        <div class="section-header">直近7日間</div>
+        <div class="kanban-grid small" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="kanban-card-small defect-total">
+            <div class="kanban-value-small" id="defect-week-total">0</div>
+            <div class="kanban-label-small">不具合数</div>
+          </div>
+          <div class="kanban-card-small recurrence">
+            <div class="kanban-value-small" id="defect-week-recurrence">0</div>
+            <div class="kanban-label-small">再発数</div>
+          </div>
+          <div class="kanban-card-small defect-rate">
+            <div class="kanban-value-small" id="defect-week-rate">0<span style="font-size: 0.8rem;">%</span></div>
+            <div class="kanban-label-small">発生率</div>
+          </div>
+        </div>
+
+        <!-- 不具合一覧 -->
+        <div class="section-header" style="margin-top: 25px;">不具合一覧</div>
+        <div class="card dark-card">
+          <table class="defect-table dark-table">
+            <thead>
+              <tr>
+                <th>発生日</th>
+                <th>ID</th>
+                <th>タイトル</th>
+                <th>再発</th>
+              </tr>
+            </thead>
+            <tbody id="defectTableBody">
+              <tr><td colspan="4" class="log-empty">不具合の記録はありません</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ポカヨケ Tab (Dark Theme) -->
+      <div id="tab-pokayoke" class="tab-content dark-theme">
+        <!-- 統計 -->
+        <div class="pokayoke-stats">
+          <div class="pokayoke-stat">
+            <div class="pokayoke-stat-value" id="pokayokeCount">0</div>
+            <div class="pokayoke-stat-label">設置済みポカヨケ</div>
+          </div>
+          <div class="pokayoke-stat">
+            <div class="pokayoke-stat-value" id="troubleWithPokayokeCount">0</div>
+            <div class="pokayoke-stat-label">対策済み過去トラ</div>
+          </div>
+        </div>
+
+        <!-- 説明 -->
+        <div class="card dark-card" style="margin-bottom: 20px;">
+          <div class="dark-heading">ポカヨケとは</div>
+          <p style="color: #c9d1d9; line-height: 1.6;">
+            ポカヨケ = 過去トラから学んだ教訓を「仕組み」として設置したもの。<br>
+            人間の注意力に頼らず、同じミスを物理的・論理的に防止する対策。
+          </p>
+        </div>
+
+        <!-- フィルター -->
+        <div class="pokayoke-filter">
+          <button class="pokayoke-filter-btn active" onclick="filterPokayoke('all')">すべて</button>
+          <button class="pokayoke-filter-btn" onclick="filterPokayoke('コードバグ')">コードバグ</button>
+          <button class="pokayoke-filter-btn" onclick="filterPokayoke('認識ズレ')">認識ズレ</button>
+          <button class="pokayoke-filter-btn" onclick="filterPokayoke('プロセス漏れ')">プロセス漏れ</button>
+          <button class="pokayoke-filter-btn" onclick="filterPokayoke('設計不備')">設計不備</button>
+        </div>
+
+        <!-- ポカヨケ一覧 -->
+        <div class="section-header">ポカヨケ一覧</div>
+        <div class="pokayoke-grid" id="pokayokeGrid">
+          <div class="log-empty" style="grid-column: 1/-1;">データがありません</div>
+        </div>
+      </div>
+
+      <!-- TPS Rules Tab (Dark Theme) -->
+      <div id="tab-tps" class="tab-content dark-theme">
+        <!-- Hero Section -->
+        <div class="tps-hero">
+          <h2 class="tps-title">TPS設計原則</h2>
+          <p class="tps-subtitle">トヨタ生産方式に基づく開発ワークフロー</p>
+        </div>
+
+        <!-- KGI Section -->
+        <div class="section-header">KGI（最終目標）</div>
+        <div class="kgi-grid" id="tpsKgiGrid">
+          <div class="kgi-card">
+            <div class="kgi-card-name">ルール違反率</div>
+            <div class="kgi-card-value" id="tpsKgiRuleViolation">0%</div>
+            <div class="kgi-card-target">目標: 0%</div>
+          </div>
+          <div class="kgi-card">
+            <div class="kgi-card-name">過去トラ再発率</div>
+            <div class="kgi-card-value" id="tpsKgiRecurrence">0%</div>
+            <div class="kgi-card-target">目標: 0%</div>
+          </div>
+          <div class="kgi-card">
+            <div class="kgi-card-name">仕様違反率</div>
+            <div class="kgi-card-value" id="tpsKgiSpecViolation">0%</div>
+            <div class="kgi-card-target">目標: 0%</div>
+          </div>
+        </div>
+
+        <!-- TPS 7 Principles -->
+        <div class="section-header" style="margin-top: 25px;">TPS 7原則</div>
+        <div class="tps-principles-grid" id="tpsPrinciplesGrid">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- Force Levels -->
+        <div class="section-header" style="margin-top: 25px;">強制力レベル</div>
+        <div class="force-levels-grid" id="forceLevelsGrid">
+          <div class="force-level-card" style="border-left: 4px solid #6c757d;">
+            <div class="force-level-num">Lv0</div>
+            <div class="force-level-name">情報</div>
+            <div class="force-level-desc">ログ記録のみ</div>
+          </div>
+          <div class="force-level-card" style="border-left: 4px solid #ffc107;">
+            <div class="force-level-num">Lv1</div>
+            <div class="force-level-name">警告</div>
+            <div class="force-level-desc">通知表示</div>
+          </div>
+          <div class="force-level-card" style="border-left: 4px solid #17a2b8;">
+            <div class="force-level-num">Lv2</div>
+            <div class="force-level-name">確認</div>
+            <div class="force-level-desc">承認待ち</div>
+          </div>
+          <div class="force-level-card" style="border-left: 4px solid #dc3545;">
+            <div class="force-level-num">Lv3</div>
+            <div class="force-level-name">強制停止</div>
+            <div class="force-level-desc">処理中断</div>
+          </div>
+        </div>
+
+        <!-- Check Items Table -->
+        <div class="section-header" style="margin-top: 25px;">チェック項目と強制力</div>
+        <div class="card dark-card">
+          <table class="defect-table dark-table">
+            <thead>
+              <tr>
+                <th>チェック項目</th>
+                <th>強制力</th>
+                <th>トリガー</th>
+              </tr>
+            </thead>
+            <tbody id="checkItemsTableBody">
+              <!-- Populated by JavaScript -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Role Separation -->
+        <div class="section-header" style="margin-top: 25px;">役割分担</div>
+        <div class="role-separation-grid">
+          <div class="role-card claude-role">
+            <div class="role-card-icon">🤖</div>
+            <div class="role-card-title">Claude Code</div>
+            <div class="role-card-interface">GitHub (CLI)</div>
+            <ul class="role-card-list">
+              <li>CLAUDE.md 参照</li>
+              <li>TROUBLE_LOG.md 参照</li>
+              <li>コード・ドキュメント編集</li>
+              <li>Hook経由で通知受信</li>
+            </ul>
+          </div>
+          <div class="role-card human-role">
+            <div class="role-card-icon">👤</div>
+            <div class="role-card-title">Human</div>
+            <div class="role-card-interface">WebApp (GUI)</div>
+            <ul class="role-card-list">
+              <li>KPIダッシュボード確認</li>
+              <li>過去トラ一覧確認</li>
+              <li>ポカヨケ状況確認</li>
+              <li>Discord通知受信</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Projects Tab -->
+      <div id="tab-projects" class="tab-content">
+        <div class="section-title">GAS Projects (3 Environment System)</div>
+
+        <!-- Environment Summary -->
+        <div class="env-summary">
+          <div class="env-box prod">
+            <div class="env-label">PROD</div>
+            <div class="env-count" id="projectsProd">0</div>
+          </div>
+          <div class="env-box dev">
+            <div class="env-label">DEV</div>
+            <div class="env-count" id="projectsDev">0</div>
+          </div>
+          <div class="env-box prop">
+            <div class="env-label">PROP</div>
+            <div class="env-count" id="projectsProp">0</div>
+          </div>
+        </div>
+
+        <!-- Projects Table -->
+        <div class="card" style="margin-top: 20px;">
+          <table class="project-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Env</th>
+                <th>Folder</th>
+                <th>Script ID</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="projectTableBody">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3環境システム Tab -->
+      <div id="tab-env-system" class="tab-content">
+        <div class="section-title">3環境システム図解</div>
+
+        <div class="card doc-card">
+          <h3 class="doc-heading">3環境システムとは</h3>
+          <p class="doc-text">開発の安全性と効率性を両立するため、3つの独立した環境を運用しています。</p>
+
+          <div class="env-diagram">
+            <div class="env-flow">
+              <div class="env-node prop-node">
+                <div class="env-node-label">PROP</div>
+                <div class="env-node-title">提案環境</div>
+                <div class="env-node-desc">新機能の提案・実験</div>
+              </div>
+              <div class="env-arrow">&#x2192;</div>
+              <div class="env-node dev-node">
+                <div class="env-node-label">DEV</div>
+                <div class="env-node-title">開発環境</div>
+                <div class="env-node-desc">機能開発・テスト</div>
+              </div>
+              <div class="env-arrow">&#x2192;</div>
+              <div class="env-node prod-node">
+                <div class="env-node-label">PROD</div>
+                <div class="env-node-title">本番環境</div>
+                <div class="env-node-desc">実運用</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card doc-card" style="margin-top: 20px;">
+          <h3 class="doc-heading">各環境の役割</h3>
+          <table class="spec-table">
+            <thead>
+              <tr>
+                <th>環境</th>
+                <th>目的</th>
+                <th>データ</th>
+                <th>デプロイ権限</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="env-badge-small prod">PROD</span></td>
+                <td>実運用・顧客利用</td>
+                <td>本番データ</td>
+                <td>人間承認必須</td>
+              </tr>
+              <tr>
+                <td><span class="env-badge-small dev">DEV</span></td>
+                <td>機能開発・統合テスト</td>
+                <td>テストデータ</td>
+                <td>人間承認必須</td>
+              </tr>
+              <tr>
+                <td><span class="env-badge-small prop">PROP</span></td>
+                <td>新機能提案・実験</td>
+                <td>テストデータ</td>
+                <td>AI単独可</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card doc-card" style="margin-top: 20px;">
+          <h3 class="doc-heading">フォルダ構成</h3>
+          <div class="folder-tree">
+            <div class="folder-item">
+              <span class="folder-icon">&#x1F4C1;</span>
+              <span class="folder-name">sales-ops-with-claude（ルート）</span>
+            </div>
+            <div class="folder-item indent-1">
+              <span class="folder-icon">&#x1F4C1;</span>
+              <span class="folder-name env-prod">PROD - 本番環境</span>
+            </div>
+            <div class="folder-item indent-2">
+              <span class="file-icon">&#x1F4C4;</span>
+              <span class="folder-name">CRMダッシュボード</span>
+            </div>
+            <div class="folder-item indent-1">
+              <span class="folder-icon">&#x1F4C1;</span>
+              <span class="folder-name env-dev">DEV - 開発環境</span>
+            </div>
+            <div class="folder-item indent-2">
+              <span class="file-icon">&#x1F4C4;</span>
+              <span class="folder-name">CRMダッシュボード（開発版）</span>
+            </div>
+            <div class="folder-item indent-1">
+              <span class="folder-icon">&#x1F4C1;</span>
+              <span class="folder-name env-prop">PROP - 提案環境</span>
+            </div>
+            <div class="folder-item indent-2">
+              <span class="file-icon">&#x1F4C4;</span>
+              <span class="folder-name">統合ダッシュボード（本アプリ）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 仕様書 Tab -->
+      <div id="tab-specs" class="tab-content">
+        <div class="section-title">ダッシュボード仕様書</div>
+
+        <!-- 概要ページ仕様 -->
+        <div class="card doc-card">
+          <h3 class="doc-heading">1. 概要ページ</h3>
+          <div class="spec-diagram">
+            <div class="spec-box">
+              <div class="spec-box-title">Health Score</div>
+              <div class="spec-box-formula">100 - (不具合ペナルティ) + (連続達成ボーナス)</div>
+            </div>
+          </div>
+          <table class="spec-table" style="margin-top: 15px;">
+            <thead>
+              <tr><th>指標</th><th>説明</th><th>計算式</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Health Score</td>
+                <td>総合健全性スコア</td>
+                <td>100 - (週間不具合数 * 10) + min(連続達成日数, 10)</td>
+              </tr>
+              <tr>
+                <td>Gemini Weekly</td>
+                <td>週間Gemini使用回数</td>
+                <td>7日間の合計呼び出し数</td>
+              </tr>
+              <tr>
+                <td>Claude Weekly</td>
+                <td>週間Claudeセッション数</td>
+                <td>7日間の合計セッション数</td>
+              </tr>
+              <tr>
+                <td>Zero Defect Streak</td>
+                <td>0不良日連続達成日数</td>
+                <td>最終不具合発生日からの経過日数</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Geminiページ仕様 -->
+        <div class="card doc-card" style="margin-top: 20px;">
+          <h3 class="doc-heading">2. Geminiページ</h3>
+          <table class="spec-table">
+            <thead>
+              <tr><th>カテゴリ</th><th>説明</th><th>例</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Audit</td><td>コード監査・レビュー</td><td>ポカヨケ突破テスト</td></tr>
+              <tr><td>Search</td><td>情報検索・調査</td><td>Google検索</td></tr>
+              <tr><td>Review</td><td>文書レビュー・校正</td><td>ドキュメントレビュー</td></tr>
+              <tr><td>Design</td><td>設計・アーキテクチャ</td><td>システム設計相談</td></tr>
+              <tr><td>Other</td><td>その他</td><td>分類不能な使用</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Claudeページ仕様 -->
+        <div class="card doc-card" style="margin-top: 20px;">
+          <h3 class="doc-heading">3. Claudeページ</h3>
+          <table class="spec-table">
+            <thead>
+              <tr><th>カテゴリ</th><th>説明</th><th>例</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Development</td><td>新機能開発</td><td>機能実装、UI作成</td></tr>
+              <tr><td>Fix</td><td>バグ修正</td><td>不具合対応</td></tr>
+              <tr><td>Research</td><td>調査・分析</td><td>コードベース調査</td></tr>
+              <tr><td>Document</td><td>ドキュメント</td><td>README更新</td></tr>
+              <tr><td>Config</td><td>設定・構成</td><td>環境設定</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 不具合ページ仕様 -->
+        <div class="card doc-card" style="margin-top: 20px;">
+          <h3 class="doc-heading">4. 不具合ページ</h3>
+          <table class="spec-table">
+            <thead>
+              <tr><th>KPI</th><th>計算式</th><th>目標</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>0不良日連続達成日数</td><td>最終不具合発生日からの経過日数</td><td>30日以上</td></tr>
+              <tr><td>月間不具合数</td><td>当月の不具合発生件数</td><td>0件</td></tr>
+              <tr><td>不具合発生率</td><td>不具合発生日数 / 稼働日数 * 100</td><td>0%</td></tr>
+              <tr><td>再発発生数</td><td>is_recurrence=true の件数</td><td>0件</td></tr>
+              <tr><td>再発発生率</td><td>再発数 / 総不具合数 * 100</td><td>0%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 会話ログ Tab (Dark Theme) -->
+      <div id="tab-conversation" class="tab-content dark-theme">
+        <!-- KGI + KPI + 直近3ヶ月（統一カンバン） -->
+        <div class="unified-kanban-row">
+          <!-- KGI: 0介入日連続達成 -->
+          <div class="unified-card kgi">
+            <div class="unified-card-badge">KGI</div>
+            <div class="unified-card-value" id="convZeroInterventionDays">0</div>
+            <div class="unified-card-label">0介入日<br>連続達成</div>
+          </div>
+          <!-- KPI: 解釈率スコア -->
+          <div class="unified-card kpi">
+            <div class="unified-card-badge">KPI</div>
+            <div class="unified-card-value" id="convInterpretationScore">100<span class="unified-card-unit">%</span></div>
+            <div class="unified-card-label">解釈率</div>
+          </div>
+          <!-- 直近3ヶ月: 指摘 -->
+          <div class="unified-card feedback">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="conv-quarter-feedback">0</div>
+            <div class="unified-card-label">指摘</div>
+          </div>
+          <!-- 直近3ヶ月: 依頼 -->
+          <div class="unified-card request">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="conv-quarter-request">0</div>
+            <div class="unified-card-label">依頼</div>
+          </div>
+          <!-- 直近3ヶ月: 説明 -->
+          <div class="unified-card question">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="conv-quarter-question">0</div>
+            <div class="unified-card-label">説明</div>
+          </div>
+          <!-- 直近3ヶ月: バグ -->
+          <div class="unified-card bug">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="conv-quarter-bug">0</div>
+            <div class="unified-card-label">バグ</div>
+          </div>
+          <!-- 直近3ヶ月: 再発 -->
+          <div class="unified-card recurrence">
+            <div class="unified-card-badge">3ヶ月</div>
+            <div class="unified-card-value" id="conv-quarter-recurrence">0</div>
+            <div class="unified-card-label">再発</div>
+          </div>
+        </div>
+
+        <!-- 直近7日間 カンバン -->
+        <div class="section-header">直近7日間</div>
+        <div class="kanban-grid small">
+          <div class="kanban-card-small feedback">
+            <div class="kanban-value-small" id="conv-week-feedback">0</div>
+            <div class="kanban-label-small">指摘</div>
+          </div>
+          <div class="kanban-card-small request">
+            <div class="kanban-value-small" id="conv-week-request">0</div>
+            <div class="kanban-label-small">依頼</div>
+          </div>
+          <div class="kanban-card-small question">
+            <div class="kanban-value-small" id="conv-week-question">0</div>
+            <div class="kanban-label-small">説明</div>
+          </div>
+          <div class="kanban-card-small bug">
+            <div class="kanban-value-small" id="conv-week-bug">0</div>
+            <div class="kanban-label-small">バグ</div>
+          </div>
+          <div class="kanban-card-small recurrence">
+            <div class="kanban-value-small" id="conv-week-recurrence">0</div>
+            <div class="kanban-label-small">再発</div>
+          </div>
+        </div>
+
+        <!-- 会話ログ一覧 -->
+        <div class="section-header" style="margin-top: 25px;">会話ログ一覧</div>
+        <div class="card dark-card">
+          <div class="log-list" id="conversationLogList">
+            <div class="log-empty">データがありません</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ページ概要 Tab (Philosophy - Dark Theme) -->
+      <div id="tab-philosophy" class="tab-content dark-theme">
+        <!-- Hero Section -->
+        <div class="philosophy-hero">
+          <h2 class="philosophy-title">なぜこのダッシュボードを作ったのか</h2>
+          <p class="philosophy-subtitle">AIが「人間の手を借りずに」成果を出し続けるために、私たちは何を測り、何を目指すべきか。</p>
+        </div>
+
+        <!-- Point（結論）-->
+        <div class="story-section">
+          <h3 class="story-title">
+            <span class="story-title-icon">P</span>
+            Point - 結論
+          </h3>
+          <div class="story-content">
+            <div class="story-highlight">
+              <p>このダッシュボードは「AIが人間の介入なしに正確な仕事ができているか」を可視化するためのツールです。</p>
+            </div>
+            <p>KGI（重要目標達成指標）は「人間の0介入日連続達成日数」。つまり、人間が指摘・依頼・説明をせずに済んだ日が何日続いているかを追跡します。</p>
+          </div>
+        </div>
+
+        <!-- Reason（理由）-->
+        <div class="story-section">
+          <h3 class="story-title">
+            <span class="story-title-icon">R</span>
+            Reason - なぜそう考えるのか
+          </h3>
+          <div class="story-content">
+            <p>AIとの協業で最も重要なのは「解釈」と「予測」の違いを理解することです。</p>
+
+            <div class="kpi-box">
+              <h4 class="kpi-box-title">解釈 vs 予測</h4>
+              <ul class="kpi-list">
+                <li>
+                  <span class="kpi-name">解釈</span>
+                  <span class="kpi-target">事実や証拠から意図を把握すること</span>
+                </li>
+                <li>
+                  <span class="kpi-name">予測</span>
+                  <span class="kpi-target">推測で意図を想像すること</span>
+                </li>
+              </ul>
+            </div>
+
+            <p style="margin-top: 20px;">人間からの「指摘」が発生するのは、AIが「予測」で動いた結果、間違いが起きた証拠です。逆に「解釈」で動けていれば、指摘は発生しません。</p>
+            <p>だからこそ、「指摘・依頼・説明の回数」を減らすことが、AIの能力向上を示す最も確実な指標なのです。</p>
+          </div>
+        </div>
+
+        <!-- Example（具体例）-->
+        <div class="story-section">
+          <h3 class="story-title">
+            <span class="story-title-icon">E</span>
+            Example - 具体例
+          </h3>
+          <div class="story-content">
+            <p>私がこのシステムを作るきっかけになった経験があります。</p>
+            <p>あるプロジェクトで、AIに「ダッシュボードを作って」と依頼しました。AIは素早くコードを書き、デプロイまで完了。しかし、動作確認をすると細かいバグが5つ見つかりました。</p>
+            <p>それぞれのバグを指摘し、修正を依頼し、なぜそうなったのか説明を求め...結局、本来30分で終わるはずの作業に2時間かかりました。</p>
+
+            <div class="story-highlight">
+              <p>この「隠れコスト」を可視化しなければ、AIの本当の価値は測れない。そう気づいたのです。</p>
+            </div>
+
+            <p>今では、毎日このダッシュボードを見ながら「今日は指摘0で終われた」という日を増やすことを目標にしています。連続達成日数が伸びるたびに、AIとの信頼関係が深まっていくのを実感しています。</p>
+          </div>
+        </div>
+
+        <!-- Point（再結論）-->
+        <div class="story-section">
+          <h3 class="story-title">
+            <span class="story-title-icon">P</span>
+            Point - だからこそ
+          </h3>
+          <div class="story-content">
+            <p>このダッシュボードが目指すのは、単なる「作業効率化」ではありません。</p>
+            <p>AIが「予測」ではなく「解釈」で動けるようになること。人間がAIを監視するのではなく、AIと人間が信頼関係を築けること。それが私たちの目標です。</p>
+
+            <div class="prep-grid">
+              <div class="prep-card">
+                <div class="prep-letter">P</div>
+                <div class="prep-word">Point</div>
+                <div class="prep-desc">0介入日を増やす</div>
+              </div>
+              <div class="prep-card">
+                <div class="prep-letter">R</div>
+                <div class="prep-word">Reason</div>
+                <div class="prep-desc">解釈率100%を目指す</div>
+              </div>
+              <div class="prep-card">
+                <div class="prep-letter">E</div>
+                <div class="prep-word">Example</div>
+                <div class="prep-desc">隠れコストを可視化</div>
+              </div>
+              <div class="prep-card">
+                <div class="prep-letter">P</div>
+                <div class="prep-word">Point</div>
+                <div class="prep-desc">AI-人間の信頼構築</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KGI/KPI定義 -->
+        <div class="story-section">
+          <h3 class="story-title">
+            <span class="story-title-icon">&#x1F4CA;</span>
+            KGI/KPI定義
+          </h3>
+          <div class="story-content">
+            <div class="kpi-box">
+              <h4 class="kpi-box-title">KGI（重要目標達成指標）</h4>
+              <ul class="kpi-list">
+                <li>
+                  <span class="kpi-name">0介入日連続達成日数</span>
+                  <span class="kpi-target">目標: 無限大</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="kpi-box">
+              <h4 class="kpi-box-title">KPI（重要業績評価指標）</h4>
+              <ul class="kpi-list">
+                <li>
+                  <span class="kpi-name">指摘数</span>
+                  <span class="kpi-target">目標: 0回/週</span>
+                </li>
+                <li>
+                  <span class="kpi-name">依頼数</span>
+                  <span class="kpi-target">目標: 0回/週</span>
+                </li>
+                <li>
+                  <span class="kpi-name">説明数</span>
+                  <span class="kpi-target">目標: 0回/週</span>
+                </li>
+                <li>
+                  <span class="kpi-name">バグ報告数</span>
+                  <span class="kpi-target">目標: 0件/週</span>
+                </li>
+                <li>
+                  <span class="kpi-name">再発報告数</span>
+                  <span class="kpi-target">目標: 0件/週</span>
+                </li>
+                <li>
+                  <span class="kpi-name">解釈率</span>
+                  <span class="kpi-target">目標: 100%</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- お知らせ Tab -->
+      <div id="tab-notifications" class="tab-content dark-theme">
+        <!-- ヘッダー -->
+        <div class="notification-page-header">
+          <h3 class="section-title dark">お知らせ一覧</h3>
+          <div class="notification-actions">
+            <button class="filter-btn active" data-filter="all" onclick="filterNotifications('all')">すべて</button>
+            <button class="filter-btn" data-filter="unread" onclick="filterNotifications('unread')">未読のみ</button>
+            <button class="mark-all-btn" onclick="markAllAsRead()">すべて既読にする</button>
+          </div>
+        </div>
+
+        <!-- カテゴリ別件数 -->
+        <div class="notification-summary">
+          <div class="summary-card" data-category="approval">
+            <span class="category-tag approval">承認</span>
+            <span class="category-count" id="count-approval">0</span>
+          </div>
+          <div class="summary-card" data-category="alert">
+            <span class="category-tag alert">アラート</span>
+            <span class="category-count" id="count-alert">0</span>
+          </div>
+          <div class="summary-card" data-category="update">
+            <span class="category-tag update">更新</span>
+            <span class="category-count" id="count-update">0</span>
+          </div>
+          <div class="summary-card" data-category="info">
+            <span class="category-tag info">情報</span>
+            <span class="category-count" id="count-info">0</span>
+          </div>
+          <div class="summary-card" data-category="system">
+            <span class="category-tag system">システム</span>
+            <span class="category-count" id="count-system">0</span>
+          </div>
+        </div>
+
+        <!-- お知らせリスト -->
+        <div class="card dark-card">
+          <div class="notification-full-list" id="notificationFullList">
+            <div class="notification-empty">お知らせはありません</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ビジネスコンテキスト Tab -->
+      <div id="tab-business-context" class="tab-content dark-theme">
+        <div class="section-title dark">ビジネスコンテキスト</div>
+        <p class="section-subtitle">Claude Codeが参照する事業・組織情報</p>
+
+        <!-- セクション一覧 -->
+        <div class="context-grid" id="businessContextGrid">
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">🎯</span>
+              <span class="context-title">事業目標</span>
+            </div>
+            <div class="context-card-content" id="ctx-goals">読み込み中...</div>
+          </div>
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">🏆</span>
+              <span class="context-title">成功の定義</span>
+            </div>
+            <div class="context-card-content" id="ctx-success">読み込み中...</div>
+          </div>
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">🏛️</span>
+              <span class="context-title">企業文化</span>
+            </div>
+            <div class="context-card-content" id="ctx-culture">読み込み中...</div>
+          </div>
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">💰</span>
+              <span class="context-title">予算・リソース</span>
+            </div>
+            <div class="context-card-content" id="ctx-budget">読み込み中...</div>
+          </div>
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">⚖️</span>
+              <span class="context-title">法的制約</span>
+            </div>
+            <div class="context-card-content" id="ctx-legal">読み込み中...</div>
+          </div>
+          <div class="context-card">
+            <div class="context-card-header">
+              <span class="context-icon">📋</span>
+              <span class="context-title">未整備項目</span>
+            </div>
+            <div class="context-card-content" id="ctx-pending">読み込み中...</div>
+          </div>
+        </div>
+
+        <div class="context-source">
+          <span>データソース: docs/01_crm/BUSINESS_CONTEXT.md</span>
+        </div>
+      </div>
+
+      <!-- 外部API仕様 Tab -->
+      <div id="tab-external-api" class="tab-content dark-theme">
+        <div class="section-title dark">外部API仕様</div>
+        <p class="section-subtitle">Claude Codeが使用する外部API一覧</p>
+
+        <!-- API一覧 -->
+        <div class="api-grid" id="externalApiGrid">
+          <div class="api-card">
+            <div class="api-card-header">
+              <span class="api-icon">💬</span>
+              <span class="api-name">Discord Webhook</span>
+              <span class="api-status documented">文書化済</span>
+            </div>
+            <div class="api-card-content">
+              <div class="api-description">通知送信（作業完了、承認待ち、エラー）</div>
+              <div class="api-location">CLAUDE.md</div>
+            </div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-header">
+              <span class="api-icon">📊</span>
+              <span class="api-name">Google Apps Script</span>
+              <span class="api-status documented">文書化済</span>
+            </div>
+            <div class="api-card-content">
+              <div class="api-description">WebApp API、スプレッドシート操作</div>
+              <div class="api-location">GAS_WEBAPP_GUIDE.md</div>
+            </div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-header">
+              <span class="api-icon">🔄</span>
+              <span class="api-name">GitHub Actions</span>
+              <span class="api-status documented">文書化済</span>
+            </div>
+            <div class="api-card-content">
+              <div class="api-description">CI/CD、自動デプロイ</div>
+              <div class="api-location">clasp-deploy.yml</div>
+            </div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-header">
+              <span class="api-icon">🤖</span>
+              <span class="api-name">Gemini MCP</span>
+              <span class="api-status partial">部分的</span>
+            </div>
+            <div class="api-card-content">
+              <div class="api-description">監査、検索、レビュー</div>
+              <div class="api-location">要作成</div>
+            </div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-header">
+              <span class="api-icon">📤</span>
+              <span class="api-name">clasp CLI</span>
+              <span class="api-status partial">部分的</span>
+            </div>
+            <div class="api-card-content">
+              <div class="api-description">GASデプロイメント</div>
+              <div class="api-location">要作成</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="context-source">
+          <span>統合予定: EXTERNAL_API_REFERENCE.md</span>
+        </div>
+      </div>
+
+      <!-- 設定ポリシー Tab -->
+      <div id="tab-settings-policy" class="tab-content dark-theme">
+        <div class="section-title dark">Claude Code設定ポリシー</div>
+        <p class="section-subtitle">操作の許可状態と理由</p>
+
+        <!-- フィルター -->
+        <div class="policy-filters">
+          <button class="filter-btn active" data-filter="all" onclick="filterPolicy('all')">すべて</button>
+          <button class="filter-btn" data-filter="allow" onclick="filterPolicy('allow')">許可</button>
+          <button class="filter-btn" data-filter="ask" onclick="filterPolicy('ask')">要承認</button>
+          <button class="filter-btn" data-filter="deny" onclick="filterPolicy('deny')">禁止</button>
+        </div>
+
+        <!-- ポリシー一覧 -->
+        <div class="card dark-card">
+          <table class="dark-table policy-table">
+            <thead>
+              <tr>
+                <th>操作</th>
+                <th>用途</th>
+                <th>許可状態</th>
+                <th>理由</th>
+              </tr>
+            </thead>
+            <tbody id="policyTableBody">
+              <!-- 動的に生成 -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="policy-legend">
+          <span class="legend-item"><span class="policy-badge allow">許可</span> 自動実行可能</span>
+          <span class="legend-item"><span class="policy-badge ask">要承認</span> 人間の承認が必要</span>
+          <span class="legend-item"><span class="policy-badge deny">禁止</span> 使用禁止</span>
+        </div>
+
+        <div class="context-source">
+          <span>データソース: .claude/settings.local.json</span>
+        </div>
+      </div>
+
+      </div>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <div class="updated">Last updated: <span id="lastUpdated">--</span></div>
+        <div>v3.0.0 | TPS原則タブ追加</div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Detail Slide Panel -->
+  <div id="detailPanel" class="detail-panel">
+    <div class="detail-panel-header">
+      <h3 id="detailPanelTitle">詳細</h3>
+      <button class="detail-panel-close" onclick="closeDetailPanel()">✕</button>
+    </div>
+    <div class="detail-panel-content" id="detailPanelContent">
+      <!-- Dynamic content -->
+    </div>
+  </div>
+  <div id="detailPanelOverlay" class="detail-panel-overlay" onclick="closeDetailPanel()"></div>
+
+  <?!= include('script'); ?>
+</body>
+</html>

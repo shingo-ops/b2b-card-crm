@@ -1,0 +1,19 @@
+{
+  "name": "crm-dashboard",
+  "version": "1.0.0",
+  "description": "CRM Dashboard - Google Apps Script Web Application",
+  "scripts": {
+    "check": "node scripts/check-api-integrity.js",
+    "check:verbose": "node scripts/check-api-integrity.js --verbose",
+    "push": "npm run check && clasp push",
+    "deploy": "npm run check && clasp push && echo 'Deploy完了'"
+  },
+  "keywords": [
+    "crm",
+    "gas",
+    "google-apps-script"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true
+}

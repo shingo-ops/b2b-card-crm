@@ -1,0 +1,225 @@
+# 自動バックアップ検証
+# KGI: バックアップ整合性エラー 0件
+# push後にリモート/ローカルの整合性を検証
+
+name: Backup Verification
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  verify-backup-integrity:
+    name: Verify Backup Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify commit integrity
+        id: verify-commit
+        run: |
+          echo "==========================================="
+          echo "コミット整合性検証"
+          echo "KGI: バックアップ整合性エラー 0件"
+          echo "==========================================="
+          echo ""
+
+          # 最新コミットのハッシュ
+          COMMIT_HASH=$(git rev-parse HEAD)
+          echo "現在のコミット: $COMMIT_HASH"
+
+          # コミットが正しく作成されているか
+          if git cat-file -t "$COMMIT_HASH" | grep -q "commit"; then
+            echo "✅ コミットオブジェクト: 正常"
+          else
+            echo "❌ コミットオブジェクト: 異常"
+            exit 1
+          fi
+
+          # ツリーオブジェクトの検証
+          TREE_HASH=$(git rev-parse HEAD^{tree})
+          if git cat-file -t "$TREE_HASH" | grep -q "tree"; then
+            echo "✅ ツリーオブジェクト: 正常"
+          else
+            echo "❌ ツリーオブジェクト: 異常"
+            exit 1
+          fi
+
+          echo ""
+          echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+
+      - name: Verify file checksums
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "ファイルチェックサム検証"
+          echo "==========================================="
+          echo ""
+
+          # 重要ファイルのチェックサム計算
+          IMPORTANT_FILES=(
+            "CLAUDE.md"
+            "docs/00_common/COMMON_RULES.md"
+            "docs/01_crm/PROJECT_SPECIFICATION.md"
+          )
+
+          for file in "${IMPORTANT_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              checksum=$(sha256sum "$file" | cut -d' ' -f1)
+              echo "✅ $file"
+              echo "   SHA256: ${checksum:0:16}..."
+            else
+              echo "⚠️ $file: 存在しません"
+            fi
+          done
+
+      - name: Verify branch protection
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "ブランチ状態検証"
+          echo "==========================================="
+          echo ""
+
+          # 現在のブランチ
+          CURRENT_BRANCH=$(git branch --show-current)
+          echo "現在のブランチ: $CURRENT_BRANCH"
+
+          # リモートとの差分
+          git fetch origin "$CURRENT_BRANCH" --quiet 2>/dev/null || true
+
+          LOCAL_HASH=$(git rev-parse HEAD)
+          REMOTE_HASH=$(git rev-parse "origin/$CURRENT_BRANCH" 2>/dev/null || echo "unknown")
+
+          if [ "$LOCAL_HASH" = "$REMOTE_HASH" ]; then
+            echo "✅ ローカルとリモート: 同期済み"
+          elif [ "$REMOTE_HASH" = "unknown" ]; then
+            echo "⚠️ リモートブランチが存在しません"
+          else
+            echo "⚠️ ローカルとリモートに差分があります"
+            echo "   ローカル: $LOCAL_HASH"
+            echo "   リモート: $REMOTE_HASH"
+          fi
+
+      - name: Verify directory structure
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "ディレクトリ構造検証"
+          echo "==========================================="
+          echo ""
+
+          # 必須ディレクトリの存在確認
+          REQUIRED_DIRS=(
+            "docs/00_common"
+            "docs/00_common/PROCESS_QUALITY"
+            "docs/01_crm"
+            "scripts"
+            ".github/workflows"
+          )
+
+          ERRORS=0
+          for dir in "${REQUIRED_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              file_count=$(find "$dir" -maxdepth 1 -type f | wc -l)
+              echo "✅ $dir ($file_count files)"
+            else
+              echo "❌ $dir: 存在しません"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "❌ $ERRORS 件のディレクトリ欠落"
+            exit 1
+          fi
+
+      - name: Generate backup report
+        if: always()
+        run: |
+          echo ""
+          echo "==========================================="
+          echo "バックアップ検証レポート"
+          echo "==========================================="
+          echo ""
+          echo "| 項目 | 状態 |"
+          echo "|------|------|"
+          echo "| 検証日時 | $(date '+%Y-%m-%d %H:%M:%S') |"
+          echo "| コミット | ${{ steps.verify-commit.outputs.commit_hash || 'N/A' }} |"
+          echo "| ブランチ | ${{ github.ref_name }} |"
+          echo "| KGI | 整合性エラー0件 |"
+
+  # 定期バックアップ検証（週次）
+  weekly-backup-check:
+    name: Weekly Backup Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Analyze commit history
+        run: |
+          echo "==========================================="
+          echo "週次バックアップ分析"
+          echo "==========================================="
+          echo ""
+
+          # 過去7日間のコミット数
+          WEEK_AGO=$(date -d '7 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-7d '+%Y-%m-%d')
+          COMMIT_COUNT=$(git log --since="$WEEK_AGO" --oneline 2>/dev/null | wc -l || echo "0")
+
+          echo "過去7日間のコミット数: $COMMIT_COUNT"
+
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "⚠️ 過去7日間にコミットがありません"
+          else
+            echo "✅ 定期的なバックアップが行われています"
+          fi
+
+          # 最終コミット日時
+          LAST_COMMIT=$(git log -1 --format='%ci' 2>/dev/null || echo "unknown")
+          echo "最終コミット: $LAST_COMMIT"
+
+  # システム自体のポカヨケ
+  backup-verification-self-check:
+    name: Backup Verification Self Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate backup verification configuration
+        run: |
+          echo "==========================================="
+          echo "バックアップ検証自己検証"
+          echo "==========================================="
+          echo ""
+
+          if [ -f ".github/workflows/backup-verification.yml" ]; then
+            echo "✅ backup-verification.yml: 存在"
+
+            # 必須ジョブ確認
+            if grep -q "verify-backup-integrity" .github/workflows/backup-verification.yml; then
+              echo "✅ verify-backup-integrity job: 存在"
+            else
+              echo "❌ verify-backup-integrity job: 欠落"
+              exit 1
+            fi
+          else
+            echo "❌ backup-verification.yml: 存在しません"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ バックアップ検証設定: 正常"
